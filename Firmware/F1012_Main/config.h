@@ -8,8 +8,7 @@
 
 #define PIN_TIA_SEL_1		12      // pa12
 #define PIN_TIA_SEL_2		10      // pa10
-
-#define PIN_PSU_ENABLE		11
+#define PIN_PSU_ENABLE		11      // pa11
 
 
 #define DISP_CS_GPIO_Port   GPIOB
@@ -26,6 +25,11 @@
 #define AUTO_SHUTDOWN_INTERVAL		60		// 600 seconds
 
 #define NANOPRINTF_IMPLEMENTATION
+
+#define BUTTON_VALID_PERIOD_TICK    10       // tick (mS), how long to validate a button press/depress
+
+#define START_BUTTON_PRESS_DUR      500     // tick (mS), how long is it needed to hold on the start button to start trigger
+#define STOP_BUTTON_PRESS_DUR       1000
 
 #define true 1
 #define false 0

@@ -12,7 +12,7 @@ Flip PA9 and PA11 connections as follows:
 # E1011 Rev 1: Driver Board
 
 ## Errata 1: Crystal Enable
-The inverting and non-inverting inputs of the op-amp were fixed
+The inverting and non-inverting inputs of the op-amp were flipped
 
 ### Fix
 None other than time-consuming bodge wiring

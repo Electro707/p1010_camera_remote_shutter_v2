@@ -16,7 +16,6 @@ void _gc9a01_send_single_cmd_data(uint8_t command, uint8_t data);
 void _gc9a01_send_cmd_and_data(uint8_t command, uint8_t *data, int len);
 void _gc9a01_reset(void);
 
-// GC9A01 16-bit color, which is RGB565 format
 const uint32_t gc9a01_color_white = 0xFFFF;
 const uint32_t gc9a01_color_black = 0x0000;
 const uint32_t gc9a01_color_red = 0xF800;
@@ -79,9 +78,11 @@ void _gc9a01_reset(void){
 	LL_mDelay(200);
 }
 
-void gc9a01_draw_fill_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint32_t color){
+void gc9a01_draw_rect(boundingBox_t *textBox, uint32_t color){
+	uint16_t w = textBox->x1-textBox->x0;
+	uint16_t h = textBox->y1-textBox->y0;
 	uint32_t len = w * h;
-	gc9a01_set_addr_window(x, y, x+w-1, y+h-1);
+	gc9a01_set_addr_window(textBox->x0, textBox->y0, textBox->x1-1, textBox->y1-1);
 
 
 	DISP_DC_0;
@@ -92,20 +93,6 @@ void gc9a01_draw_fill_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint3
 		gc9a01_send_color(color);
 	}
 	DISP_CS_1;
-}
-
-void gc9a01_draw_fill_rect_textBox(boundingBox_t *textBox, uint32_t color){
-	uint16_t w = textBox->x1-textBox->x0;
-	uint16_t h = textBox->y1-textBox->y0;
-	gc9a01_draw_fill_rect(textBox->x0, textBox->y0, w, h, color);
-}
-
-// todo: have background color be set externally through dedicated function
-void gc9a01_draw_rect(boundingBox_t *textBox, uint32_t color, uint32_t thickness){
-	gc9a01_draw_fill_rect(textBox->x0, textBox->y0, textBox->x1-textBox->x0, thickness, color);
-	gc9a01_draw_fill_rect(textBox->x0, textBox->y0, thickness, textBox->y1-textBox->y0, color);
-	gc9a01_draw_fill_rect(textBox->x1-thickness, textBox->y0, thickness, textBox->y1-textBox->y0, color);
-	gc9a01_draw_fill_rect(textBox->x0, textBox->y1-thickness, textBox->x1-textBox->x0, thickness, color);
 }
 
 void gc9a01_point(uint16_t x, uint16_t y, uint32_t color){
@@ -235,7 +222,7 @@ void gc9a01_fill_screen(uint32_t color){
 void gc9a01_print_text(const char *text,
 					   uint16_t x, uint16_t y,
 					   uint16_t color, uint16_t bgColor,
-					   alignment_e alignMode, boundingBox_t *textBox,
+					   gc9a01_align_e alignMode, boundingBox_t *textBox,
 					   uint8_t fontWidth, uint8_t fontHeight, const uint32_t *fontLut){
 	char currText;
 	uint32_t toSend;
@@ -290,19 +277,19 @@ void gc9a01_print_text(const char *text,
 void gc9a01_print_text_big(const char *text,
 					   uint16_t x, uint16_t y,
 					   uint16_t color, uint16_t bgColor,
-					   alignment_e alignMode, boundingBox_t *textBox){
+					   gc9a01_align_e alignMode, boundingBox_t *textBox){
 	gc9a01_print_text(text, x, y, color, bgColor, alignMode, textBox, 16, 32, spleenFont32);
 }
 void gc9a01_print_text_med(const char *text, 
 					   uint16_t x, uint16_t y,
 					   uint16_t color, uint16_t bgColor,
-					   alignment_e alignMode, boundingBox_t *textBox){	
+					   gc9a01_align_e alignMode, boundingBox_t *textBox){	
 	gc9a01_print_text(text, x, y, color, bgColor, alignMode, textBox, 12, 24, spleenFont24);
 }
 void gc9a01_print_text_sma(const char *text, 
 					   uint16_t x, uint16_t y,
 					   uint16_t color, uint16_t bgColor,
-					   alignment_e alignMode, boundingBox_t *textBox){	
+					   gc9a01_align_e alignMode, boundingBox_t *textBox){	
 	gc9a01_print_text(text, x, y, color, bgColor, alignMode, textBox, 8, 16, spleenFont16);
 }
 

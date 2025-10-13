@@ -1,6 +1,6 @@
 <mxfile host="Electron" agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/28.0.6 Chrome/138.0.7204.100 Electron/37.2.3 Safari/537.36" version="28.0.6">
   <diagram name="Page-1" id="GrQtqjTuFLuELZM5Umfo">
-    <mxGraphModel dx="1473" dy="863" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2000" pageHeight="2000" math="0" shadow="0">
+    <mxGraphModel dx="826" dy="500" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2000" pageHeight="2000" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -22,9 +22,9 @@
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="Uq6Svj2bgwlRKTLqAKP9-33" value="user presses&lt;div&gt;on right button&lt;/div&gt;" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontFamily=Helvetica;fontSize=11;fontColor=default;labelBackgroundColor=default;" parent="Uq6Svj2bgwlRKTLqAKP9-31" vertex="1" connectable="0">
+        <mxCell id="Uq6Svj2bgwlRKTLqAKP9-33" value="user holds button when&lt;div&gt;start button is selected&lt;/div&gt;&lt;div&gt;for &amp;gt;500mS&lt;/div&gt;" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontFamily=Helvetica;fontSize=11;fontColor=default;labelBackgroundColor=default;" parent="Uq6Svj2bgwlRKTLqAKP9-31" vertex="1" connectable="0">
           <mxGeometry x="-0.6275" y="-1" relative="1" as="geometry">
-            <mxPoint x="98" y="-1" as="offset" />
+            <mxPoint x="108" y="-14" as="offset" />
           </mxGeometry>
         </mxCell>
         <mxCell id="Uq6Svj2bgwlRKTLqAKP9-50" style="edgeStyle=none;shape=connector;curved=1;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=default;align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=11;fontColor=default;labelBackgroundColor=default;elbow=vertical;endArrow=classic;exitX=0;exitY=1;exitDx=0;exitDy=0;flowAnimation=0;" parent="1" source="Uq6Svj2bgwlRKTLqAKP9-27" target="Uq6Svj2bgwlRKTLqAKP9-48" edge="1">
@@ -128,7 +128,7 @@
         <mxCell id="Uq6Svj2bgwlRKTLqAKP9-48" value="Shutdown" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" parent="1" vertex="1">
           <mxGeometry x="400" y="440" width="80" height="80" as="geometry" />
         </mxCell>
-        <mxCell id="Uq6Svj2bgwlRKTLqAKP9-61" style="edgeStyle=none;shape=connector;curved=1;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=default;align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=11;fontColor=default;labelBackgroundColor=default;elbow=vertical;endArrow=classic;exitX=0.5;exitY=0;exitDx=0;exitDy=0;" parent="1" source="Uq6Svj2bgwlRKTLqAKP9-63" edge="1">
+        <mxCell id="Uq6Svj2bgwlRKTLqAKP9-61" style="edgeStyle=none;shape=connector;curved=1;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=default;align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=11;fontColor=default;labelBackgroundColor=default;elbow=vertical;endArrow=classic;exitX=0.5;exitY=0;exitDx=0;exitDy=0;" parent="1" edge="1">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
               <mxPoint x="1020" y="640" />

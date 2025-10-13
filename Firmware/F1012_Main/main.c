@@ -1,3 +1,8 @@
+/**
+ * Main F1012 Firmware
+ *
+ * This runs on an STM32G071K8Tx
+ */
 #include "stm32g0xx.h"
 #include "stm32g0xx_ll_rcc.h"
 #include "stm32g0xx_ll_system.h"
@@ -8,12 +13,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include "nanoprintf.h"
-
-void autoShutdownService(void);
-void shutdownDevice(void);
-void selectTiaSens(uint8_t sens);
-void line_draw_abstract(uint8_t *canvasBuff, uint16_t canvasW, uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
-void line_draw_vert_abstract(uint8_t *canvasBuff, uint16_t canvasW, uint16_t x, uint16_t h);
+#include "graphics.h"
+#include "font.h"
 
 // run-time modes
 typedef enum{
@@ -25,22 +26,72 @@ typedef enum{
 	STATE_SHUTDOWN		// shutdown
 }stateMachine_e;
 
-// to keep track of what we are editing through UI
+// to keep track of what we are selecting through UI
 typedef enum{
-	UI_EDIT_SHUTTER_TIME,
-	UI_EDIT_TRIG_TIME,
-	UI_EDIT_TIMELAPSE_N,
-	UI_EDIT_TIMELAPSE_DUR,
-}uiEditMode_e;
+	VAR_SHUTTER_TIME = 0,
+	VAR_TRIG_TIME,
+	VAR_TIMELAPSE_N,
+	VAR_TIMELAPSE_DUR,
+	VAR_END,
+}configVars_e;
+
+typedef enum{
+	HOME_ELE_SHUTTER_TIME = 0,
+	HOME_ELE_TRIG_TIME,
+	HOME_ELE_TIMELAPSE_N,
+	HOME_ELE_TIMELAPSE_DUR,
+	HOME_ELE_START_BT,
+	HOME_ELE_END,
+}homeElements_e;
+
+// trigger configs
+struct config_s{
+	float shutterSpeed;			// sec, the shutter speed
+	float timeToTrig;			// sec, the time from trigger to shutter open
+	int timelapseNPics;		    // n, number of pictures to take in trigger time. Set to -1 for infinite
+	float timelapseInterval;	// sec, timelapse interval between different pictures 
+};
+
+struct button_s{
+	// "internal" variables
+	int validCnt;		// validation count for any press
+	int lastState;		// the last button real state
+	int preValidState;	// the button press level before validation count is started
+	int pressedDur;		// ticks, how long the button was pressed for
+	// signal for whover is using this button
+	int pressedTrig;    // signal for when button has been pressed
+	int depressedTrig;	// signal for when depressed
+};
+
+void buttonPressHandler(struct button_s *bt, uint buttonState);
+void autoShutdownService(void);
+void shutdownDevice(void);
+void selectTiaSens(uint8_t sens);
+void line_draw_abstract(uint8_t *canvasBuff, uint16_t canvasW, uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
+void line_draw_vert_abstract(uint8_t *canvasBuff, uint16_t canvasW, uint16_t x, uint16_t h);
 
 stateMachine_e state;
 uint autoShutdownTimer;		// counter for auto shutting down
+
+bool trigUpdateLcd;			// whether main should update something on the display
+
+homeElements_e selectedElem;		// selected element on screen, can be button or editable variable
+// homeElements_e lastSelectedElem;	// last value of selectedElem, used to draw only as needed
+// uint editVarCurr;			// current variable that is edited. Only valid in state `STATE_EDITING_VAR`
 uint lastEncoderState;
-uint lastLcdUpdate;			// last time since we updated the lcd
-bool trigUpdateLcd;
+int encoderCnt = 0;			// local counter for the encoder
+bool holdEncoderWaitForDepress = false;			// flag if we are waiting for the encoder to depress to not count previous hold state against counter
+
+struct button_s encoderBt;
+struct button_s leftBt;
+struct button_s rightBt;
+
+struct config_s conf;
+
+float currentTrigTime;		// ticks, current state timer for trigger and arm
 
 void initMcu(void){
-	// init clock, 32Mhz system and periferal clock
+	// init clock, 64Mhz system and periferal clock
 	LL_FLASH_SetLatency(LL_FLASH_LATENCY_1);
 	while(LL_FLASH_GetLatency() != LL_FLASH_LATENCY_1);
 
@@ -83,12 +134,13 @@ void initMcu(void){
 	GPIOA->AFR[1] |= 0x22;              // A8 and A9 -> AF2 (Timer 1 inputs)
 
 	// port b output
+	// PB1 (ROT_S) -> Switch rotation
 	// PB4 (LCD_CS) -> output
 	// PB5 (LCD_DC) -> output
 	// PB6 (LCD_RES) -> output
 	// PB7 (MOSI) -> alternate function
 	// PB8 (MISO) -> alternate function
-	GPIOB->MODER = 0xFFFE95FF;
+	GPIOB->MODER = 0xFFFE95F3;
 	GPIOB->OSPEEDR = 0x0003EA00;        // all high speed for B4 to B6, very high speed for B7-B8
 	GPIOB->AFR[0] |= 0x01 << 28;        // B7 -> AF1
 	GPIOB->AFR[1] |= 0x01 << 0;         // B8 -> AF1
@@ -125,7 +177,7 @@ void initMcu(void){
 	TIM1->CR2 = 0x0;
 	TIM1->CR1 = 0x1;
 
-	// init timer 14 as the real time interrupt of 1mS
+	// init timer 14 as the real time interrupt of 1mS	( 1/64e6 * 512 * 125 = 0.001)
 	RCC->APBENR2 |= RCC_APBENR2_TIM14EN;
 	TIM14->PSC = 512;
 	TIM14->ARR = 125;
@@ -133,7 +185,7 @@ void initMcu(void){
 	TIM14->CR1 = TIM_CR1_URS;
 	TIM14->DIER = TIM_DIER_UIE;
 
-	// init timer 6 as a longer timer, period of 10 seconds
+	// init timer 6 as the system timeout time, period of 10 seconds ( 1/32e6 * 40000 * 16000 = 10.0)
 	RCC->APBENR1 |= RCC_APBENR1_TIM6EN;
 	TIM6->CR1 = TIM_CR1_URS;
 	TIM6->DIER = TIM_DIER_UIE;
@@ -151,6 +203,17 @@ void initMcu(void){
 	SPI2->CR1 |= SPI_CR1_SPE;
 }
 
+void triggerCamera(bool trig){
+	volatile uint32_t *reg;
+	if(trig){
+		reg = &GPIOB->BSRR;
+	} else {
+		reg = &GPIOB->BRR;
+	}
+
+	*reg = (1 << 7) | (1 << 2);
+}
+
 void adcCal(void){
 	unsigned int cal = 0;
 	uint8_t n = 8;
@@ -163,87 +226,414 @@ void adcCal(void){
 	ADC1->CALFACT = cal;
 }
 
-void initSetupScreen(void){
+const char *varTexts[VAR_END] = {"Shutter Time:", "Time To Trig:", "N Pics:", "Interval:"};
+
+void drawHomeScreenValues(void){
+	char nStr[10];
+	int varI;
+	float varF;
 	uint y = 50;
-	gc9a01_fill_screen(gc9a01_color_black);
+	uint32_t fg = gc9a01_color_white;
+	uint32_t bg = gc9a01_color_black;
 
-	gc9a01_print_text_sma("Shutter Time:", 50, y, gc9a01_color_black, gc9a01_color_white, ALIGN_LEFT, NULL);
-	y += 16;
-	
-	gc9a01_print_text_sma("Time To Trig:", 50, y, gc9a01_color_white, gc9a01_color_black, ALIGN_LEFT, NULL);
-	y += 16;
+	for(int i=0;i<VAR_END;i++){
+		if(state == STATE_EDITING_VAR && selectedElem == i){
+			fg = gc9a01_color_black;
+			bg = gc9a01_color_white;
+		}
+		else {
+			fg = gc9a01_color_white;
+			bg = gc9a01_color_black;
+		}
 
-	gc9a01_print_text_sma("Timelapse: ", 50, y, gc9a01_color_white, gc9a01_color_black, ALIGN_LEFT, NULL);
-	y += 16;
+		switch(i){
+			case VAR_SHUTTER_TIME:
+				varF = conf.shutterSpeed;
+				npf_snprintf(nStr, 10, "%6.2f", varF);
+				break;
+			case VAR_TRIG_TIME:
+				varF = conf.timeToTrig;
+				npf_snprintf(nStr, 10, "%6.2f", varF);
+				break;
+			case VAR_TIMELAPSE_N:
+				varI = conf.timelapseNPics;
+				npf_snprintf(nStr, 10, "%6d", varI);
+				break;
+			case VAR_TIMELAPSE_DUR:
+				varF = conf.timelapseInterval;
+				npf_snprintf(nStr, 10, "%6.2f", varF);
+				break;
+			default:
+				break;
+		}
 
-	gc9a01_print_text_sma("N Pics: ", 50, y, gc9a01_color_white, gc9a01_color_black, ALIGN_LEFT, NULL);
-	y += 16;
-
-	gc9a01_print_text_sma("Interval: ", 50, y, gc9a01_color_white, gc9a01_color_black, ALIGN_LEFT, NULL);
-	y += 16;
+		gc9a01_print_text_sma(nStr, 205, y, fg, bg, ALIGN_RIGHT, NULL);
+		y += 32;
+	}
 }
 
-int main(void)
-{
-	char nStr[10];
+void drawHomeScreenElementsStartBtProg(float prog){
+	boundingBox_t textBox;
+	uint8_t buttonCanvas[288];			// (64*36) / 8
+
+	memset(buttonCanvas, 0, sizeof(buttonCanvas));
+
+	const uint canvasW = 64;		// keep this power of two for convinience
+	const uint canvasH = 36;		// keep this power of two for convinience
+	const uint borderW = 2;
+
+	uint32_t fg;
+	
+	// start button, background
+	textBox.x0 = 0;			// width = 64
+	textBox.x1 = canvasW;
+	textBox.y0 = 0;			// height = 36
+	textBox.y1 = 36;
+
+	canvas_draw_rect(buttonCanvas, canvasW, &textBox, borderW);
+
+	switch(state){
+		case STATE_STANDBY:
+		case STATE_EDITING_VAR:
+			if(selectedElem == HOME_ELE_START_BT){
+				fg = 0x57eb;
+			} else {
+				fg = 0xed23;
+			}
+			canvas_print_text(buttonCanvas, canvasW, "START", 32, 10, ALIGN_CENTER, 8, 16, spleenFont16);
+			break;
+		case STATE_TRIG:
+		case STATE_ARMED:
+			fg = 0xfb28;
+			canvas_print_text(buttonCanvas, canvasW, "STOP", 32, 10, ALIGN_CENTER, 8, 16, spleenFont16);
+			break;
+		default:
+			fg = 0xFFFF;
+			break;
+	}
+
+	if(prog){
+		if(prog > 1.0){
+			prog = 1.0;
+		}
+		uint w = (uint)((canvasW-2*borderW) * prog);
+		canvasFillWithInvert(buttonCanvas, canvasW, borderW, borderW, w, canvasH-2*borderW);
+	}
+
+	gc9a01_draw_bit_canvas(buttonCanvas, 88, 190, canvasW, canvasH, fg);
+}
+
+void drawHomeScreenElementsStartBt(void){
+	drawHomeScreenElementsStartBtProg(0);
+}
+
+// updates a certain progress bar. prog is from 0 to 1
+void drawHomeProgressUpdate(configVars_e config, float prog){
+	boundingBox_t textBox;
+	uint y = 50+16+(config*32);
+
+	textBox.x0 = 50;
+	textBox.x1 = 240-50;
+	textBox.y0 = y+4;
+	textBox.y1 = y+12;
+	gc9a01_draw_rect(&textBox, gc9a01_color_white, 1);
+
+	textBox.x1 = (uint16_t)(prog * 140.) + 50;
+	gc9a01_draw_fill_rect_textBox(&textBox, gc9a01_color_white);
+}
+
+void drawHomeScreenElements(void){
+	boundingBox_t textBox;
+	uint y = 50;
+	// gc9a01_fill_screen(gc9a01_color_black);
+
+	uint32_t fg = gc9a01_color_white;
+	uint32_t bg = gc9a01_color_black;
+
+	for(int i=0;i<VAR_END;i++){
+		if(state == STATE_STANDBY && selectedElem == i){
+			fg = gc9a01_color_black;
+			bg = gc9a01_color_white;
+		}
+		else {
+			fg = gc9a01_color_white;
+			bg = gc9a01_color_black;
+		}
+
+		gc9a01_print_text_sma(varTexts[i], 35, y, fg, bg, ALIGN_LEFT, NULL);
+		y += 16;
+
+		textBox.x0 = 50;
+		textBox.x1 = 240-50;
+		textBox.y0 = y+4;
+		textBox.y1 = y+12;
+		gc9a01_draw_fill_rect_textBox(&textBox, gc9a01_color_black);
+		gc9a01_draw_rect(&textBox, gc9a01_color_white, 1);
+
+		y += 16;
+	}
+
+	drawHomeScreenElementsStartBt();	
+}
+
+void setStateMachine(stateMachine_e newState){
+	TIM1->CNT = 0x8000;
+	lastEncoderState = TIM1->CNT;
+	encoderCnt = 0;
+	currentTrigTime = 0;
+
+	if(newState == STATE_TRIG){
+		triggerCamera(true);
+	} else {
+		triggerCamera(false);
+	}
+
+	if(state == STATE_STANDBY || newState == STATE_STANDBY){
+		holdEncoderWaitForDepress = true;
+	}
+
+	state = newState;
+	drawHomeScreenElements();
+	drawHomeScreenValues();
+}
+
+int main(void){
+	int encoderDelta;			// delta of reading since last to current reading
+	int encoderPostDivDelta;	// counter after dividing down the counter for not-so fine interval
+	
+	state = STATE_RESET;
 
 	initMcu();
+
 	autoShutdownTimer = 0;
-	lastLcdUpdate = 1000;		// technically infinite
 	trigUpdateLcd = false;
+
+	memset(&conf, 0, sizeof(conf));
+	conf.timelapseInterval = 1.0;
+	conf.timeToTrig = 1.0;
+	conf.shutterSpeed = 1.0;
+	memset(&encoderBt, 0, sizeof(encoderBt));
+	selectedElem = HOME_ELE_SHUTTER_TIME;
 
 	selectTiaSens(0);
 
-
 	gc9a01_init();
 
+	gc9a01_fill_screen(gc9a01_color_black);
 
-	initSetupScreen();
+	// set halfway?
+	TIM1->CNT = 0x8000;
+	lastEncoderState = TIM1->CNT;
 
-	TIM1->CNT = 100;
-	lastEncoderState = 100;
-
-	TIM14->CR1 |= TIM_CR1_CEN;		// enable timer
+	TIM1->CR1 |= TIM_CR1_CEN;		// enable timer
 	TIM6->CR1 |= TIM_CR1_CEN;		// enable timer
+	TIM14->CR1 |= TIM_CR1_CEN;		// enable timer
 	__enable_irq();
 
+	state = STATE_STANDBY;
+	drawHomeScreenElements();
+	drawHomeScreenValues();
 	for(EVER){
-		// todo: trigger if encoder is rotated or button pressed to reset auto shutdown timer
-		if(trigUpdateLcd){
-			if(lastEncoderState != TIM1->CNT){
-				lastEncoderState = TIM1->CNT;
-				npf_snprintf(nStr, 5, "%04u", (uint)TIM1->CNT);
-        		gc9a01_print_text_sma(nStr, 162, 50, 0xFFFF, 0, ALIGN_LEFT, NULL);
-				trigUpdateLcd = true;
+		// handle if we move the encoder
+		if(lastEncoderState != TIM1->CNT){
+			encoderDelta = TIM1->CNT - lastEncoderState;
+			lastEncoderState = TIM1->CNT;
+			encoderCnt += encoderDelta;
+
+			switch(state){
+				case STATE_STANDBY:
+					if(encoderCnt > 4){
+						encoderCnt = 0;
+						if(selectedElem != (HOME_ELE_END-1)){selectedElem++;}
+						drawHomeScreenElements();
+					}
+					else if(encoderCnt < -4){
+						encoderCnt = 0;
+						if(selectedElem != 0){selectedElem--;}
+						drawHomeScreenElements();
+					}
+					// lastSelectedElem = selectedElem;
+					break;
+				case STATE_EDITING_VAR:
+					encoderPostDivDelta = 0;
+					if(encoderCnt > 4){
+						encoderCnt = 0;
+						encoderPostDivDelta = 1;
+					} else if(encoderCnt < -4){
+						encoderCnt = 0;
+						encoderPostDivDelta = -1;
+					}
+					if(encoderPostDivDelta){
+						switch(selectedElem){
+							case VAR_SHUTTER_TIME:
+								conf.shutterSpeed += encoderPostDivDelta;
+								if(conf.shutterSpeed < 1.0){conf.shutterSpeed = 1.0;}
+								break;
+							case VAR_TRIG_TIME:
+								conf.timeToTrig += encoderPostDivDelta;
+								if(conf.timeToTrig < 1.0){conf.timeToTrig = 1.0;}
+								break;
+							case VAR_TIMELAPSE_N:
+								conf.timelapseNPics += encoderPostDivDelta;
+								if(conf.timelapseNPics < -1){conf.timelapseNPics = -1;}
+								break;
+							case VAR_TIMELAPSE_DUR:
+								conf.timelapseInterval += encoderPostDivDelta;
+								if(conf.timelapseInterval < 1.0){conf.timelapseInterval = 1.0;}
+								break;
+							default:
+								break;
+						}
+					}
+					drawHomeScreenValues();
+					break;
+				default:
+					break;
 			}
+
+			autoShutdownService();
 		}
+
+		switch(state){
+			case STATE_ARMED:
+				if(trigUpdateLcd){		// update as needed
+					drawHomeProgressUpdate(VAR_TRIG_TIME, currentTrigTime / conf.timeToTrig);
+				}
+				if(currentTrigTime > conf.timeToTrig){
+					setStateMachine(STATE_TRIG);
+				}
+				break;
+			case STATE_TRIG:
+				if(trigUpdateLcd){		// update as needed
+					drawHomeProgressUpdate(VAR_SHUTTER_TIME, currentTrigTime / conf.shutterSpeed);
+				}
+				if(currentTrigTime > conf.shutterSpeed){
+					setStateMachine(STATE_STANDBY);
+				}
+				break;
+			default:
+				break;
+		}
+
+		// if we press on encoder button
+		if(encoderBt.pressedTrig == true){
+			encoderBt.pressedTrig = false;
+			if(state == STATE_STANDBY){
+				if(selectedElem != HOME_ELE_START_BT){
+					setStateMachine(STATE_EDITING_VAR);
+				}
+			}
+			else if(state == STATE_EDITING_VAR){
+				setStateMachine(STATE_STANDBY);
+			}
+			
+			autoShutdownService();
+		}
+
+		// handle if we depress the encoder (for now just redraws the screen)
+		if(encoderBt.depressedTrig == true){
+			encoderBt.depressedTrig = false;
+			holdEncoderWaitForDepress = false;
+			if(state == STATE_STANDBY && selectedElem == HOME_ELE_START_BT){
+				drawHomeScreenElementsStartBt();
+			}
+			else if(state == STATE_ARMED || state == STATE_TRIG){
+				drawHomeScreenElementsStartBt();
+			}
+			autoShutdownService();
+		}
+
+		// if we are holding the button, redraw as needed
+		if(!holdEncoderWaitForDepress && encoderBt.pressedDur){
+			if(state == STATE_STANDBY && selectedElem == HOME_ELE_START_BT){
+				drawHomeScreenElementsStartBtProg(encoderBt.pressedDur / (float)START_BUTTON_PRESS_DUR);
+				if(encoderBt.pressedDur >= START_BUTTON_PRESS_DUR){
+					setStateMachine(STATE_ARMED);
+				}
+			}
+			else if(state == STATE_ARMED || state == STATE_TRIG){
+				drawHomeScreenElementsStartBtProg(encoderBt.pressedDur / (float)STOP_BUTTON_PRESS_DUR);
+				if(encoderBt.pressedDur >= STOP_BUTTON_PRESS_DUR){
+					setStateMachine(STATE_STANDBY);
+				}
+			}
+			autoShutdownService();
+		}
+
 	}
 	return 0;
 }
 
 /*
- * real time interrupt triggered by TIMx
+ * real time interrupt triggered by TIM14
  * this runs every 1Khz
  */
 void TIM14_IRQHandler(void){
+	static uint lastLcdUpdate = 0;			// last time since we updated the lcd
+	uint buttonState;
 	TIM14->SR = 0;		// clear pending interrupt
 
-	if(trigUpdateLcd == false){
-		if(lastLcdUpdate >= 100){
-			trigUpdateLcd = true;
-		}else{
-			lastLcdUpdate++;
+	// if(trigUpdateLcd == false){
+	if(lastLcdUpdate >= 50){
+		trigUpdateLcd = true;
+		lastLcdUpdate = 0;
+	}else{
+		lastLcdUpdate++;
+	}
+	// }
+
+	// if we pressed the encoder button
+	buttonState = (GPIOB->IDR & (1 << 1)) == 0;		// true if pressed, false if not
+	buttonPressHandler(&encoderBt, buttonState);
+
+	buttonState = (GPIOA->IDR & (1 << 4)) == 0;
+	buttonPressHandler(&leftBt, buttonState);
+
+	buttonState = (GPIOA->IDR & (1 << 5)) == 0;
+	buttonPressHandler(&rightBt, buttonState);
+
+	currentTrigTime += 0.001;	
+}
+
+// this gets called inside the 1Khz IQR to handle button debounding
+void buttonPressHandler(struct button_s *bt, uint buttonState){
+	if(bt->validCnt){
+		if(--bt->validCnt == 0){
+			// by this time a button was held at some state. Check if it's the same as what initiated it
+			if(!(buttonState ^ bt->preValidState)){
+				if(buttonState){
+					bt->pressedTrig = true;
+					bt->depressedTrig = false;
+				}
+				else{
+					bt->pressedTrig = false;
+					bt->depressedTrig = true;
+				}
+				bt->pressedDur = 0;
+			}
 		}
 	}
+	else{
+		if(buttonState ^ bt->lastState){		// edge trigger
+			bt->validCnt = BUTTON_VALID_PERIOD_TICK;
+			bt->preValidState = buttonState;
+		}
+		else if(buttonState){		// if are held high for 
+			bt->pressedDur++;
+		}
+	}
+	bt->lastState = buttonState;
 }
 
 // called once every 10 seconds
 void TIM6_DAC_LPTIM1_IRQHandler(void){
 	TIM6->SR = 0;	// clear pending interrupt
 	
-	autoShutdownTimer += 1;
-	if(autoShutdownTimer > AUTO_SHUTDOWN_INTERVAL){
-		shutdownDevice();
+	if(state == STATE_STANDBY){
+		autoShutdownTimer += 1;
+		if(autoShutdownTimer > AUTO_SHUTDOWN_INTERVAL){
+			shutdownDevice();
+		}
 	}
 }
 
@@ -281,49 +671,5 @@ void selectTiaSens(uint8_t sens){
 		default:
 			// todo: error handling
 			break;
-	}
-}
-
-void line_draw_vert_abstract(uint8_t *canvasBuff, uint16_t canvasW, uint16_t x, uint16_t h){
-	int16_t canvasIdx;
-
-	for(int y=0;y<h;y++){
-		canvasIdx = (y*canvasW) + x / 8;
-		canvasBuff[canvasIdx] |= 1 << (x & 0b111);
-	}
-}
-
-/**
- * draws a canvas
- * buffer is [Y][X/8], and is bit filled
- */
-void line_draw_abstract(uint8_t *canvasBuff, uint16_t canvasW, uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1){
-	// https://en.wikipedia.org/wiki/Bresenham's_line_algorithm#All_cases
-	int16_t dx = abs(x1-x0);
-	int16_t dy = -abs(y1-y0);
-	int16_t sx = x0 < x1 ? 1 : -1;
-	int16_t sy = y0 < y1 ? 1 : -1;
-	int16_t error = dx + dy;
-
-	int16_t canvasIdx;
-
-    while(1){
-        canvasIdx = (y0*canvasW) + x0 / 8;
-        if(canvasIdx < 0){
-            canvasIdx = 0;
-        }
-        canvasBuff[canvasIdx] |= 1 << (x0 & 0b111);
-
-		if((2*error) >= dy){
-			if(x0 == x1){break;}
-			error += dy;
-			x0 += sx;
-		}
-		if((2*error) <= dx){
-			if(y0 == y1){break;}
-			error += dx;
-			y0 += sy;
-		}
-
 	}
 }

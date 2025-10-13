@@ -61,5 +61,5 @@
     },
     "C_Cpp.default.defines": [
         "STM32G071xx"
-    ],
+    ]
 }

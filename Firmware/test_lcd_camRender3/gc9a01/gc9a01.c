@@ -16,7 +16,6 @@ void _gc9a01_send_single_cmd_data(uint8_t command, uint8_t data);
 void _gc9a01_send_cmd_and_data(uint8_t command, uint8_t *data, int len);
 void _gc9a01_reset(void);
 
-// GC9A01 16-bit color, which is RGB565 format
 const uint32_t gc9a01_color_white = 0xFFFF;
 const uint32_t gc9a01_color_black = 0x0000;
 const uint32_t gc9a01_color_red = 0xF800;
@@ -28,9 +27,11 @@ const uint32_t gc9a01_color_purple = 0xF81F;
 
 
 void gc9a01_send_color(uint32_t rgbParsed){
-	// SPI_Write_Byte((rgbParsed >> 16) & 0xFF);
-	SPI_Write_Byte((rgbParsed >> 8) & 0xFF);
-	SPI_Write_Byte(rgbParsed & 0xFF);
+	// SPI_Write_Byte((rgbParsed >> 8) & 0xFF);
+	// SPI_Write_Byte(rgbParsed & 0xFF);
+
+	LL_SPI_TransmitData8(SPI2, (rgbParsed >> 8)); while( (SPI2->SR & (0b11<<11)) == (0b11 << 11));
+	LL_SPI_TransmitData8(SPI2, rgbParsed & 0xFF); while( (SPI2->SR & (0b11<<11)) == (0b11 << 11));
 }
 
 uint32_t gc9a01_full_rgb_conv(uint8_t r, uint8_t g, uint8_t b){
@@ -79,9 +80,11 @@ void _gc9a01_reset(void){
 	LL_mDelay(200);
 }
 
-void gc9a01_draw_fill_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint32_t color){
+void gc9a01_draw_rect(boundingBox_t *textBox, uint32_t color){
+	uint16_t w = textBox->x1-textBox->x0;
+	uint16_t h = textBox->y1-textBox->y0;
 	uint32_t len = w * h;
-	gc9a01_set_addr_window(x, y, x+w-1, y+h-1);
+	gc9a01_set_addr_window(textBox->x0, textBox->y0, textBox->x1-1, textBox->y1-1);
 
 
 	DISP_DC_0;
@@ -91,21 +94,8 @@ void gc9a01_draw_fill_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint3
 	for(uint32_t i=0;i<len;i++){
 		gc9a01_send_color(color);
 	}
+	while( (SPI2->SR & (1<<7)) != 0);
 	DISP_CS_1;
-}
-
-void gc9a01_draw_fill_rect_textBox(boundingBox_t *textBox, uint32_t color){
-	uint16_t w = textBox->x1-textBox->x0;
-	uint16_t h = textBox->y1-textBox->y0;
-	gc9a01_draw_fill_rect(textBox->x0, textBox->y0, w, h, color);
-}
-
-// todo: have background color be set externally through dedicated function
-void gc9a01_draw_rect(boundingBox_t *textBox, uint32_t color, uint32_t thickness){
-	gc9a01_draw_fill_rect(textBox->x0, textBox->y0, textBox->x1-textBox->x0, thickness, color);
-	gc9a01_draw_fill_rect(textBox->x0, textBox->y0, thickness, textBox->y1-textBox->y0, color);
-	gc9a01_draw_fill_rect(textBox->x1-thickness, textBox->y0, thickness, textBox->y1-textBox->y0, color);
-	gc9a01_draw_fill_rect(textBox->x0, textBox->y1-thickness, textBox->x1-textBox->x0, thickness, color);
 }
 
 void gc9a01_point(uint16_t x, uint16_t y, uint32_t color){
@@ -119,7 +109,7 @@ void gc9a01_point(uint16_t x, uint16_t y, uint32_t color){
 	for(uint32_t i=0;i<1;i++){
 		gc9a01_send_color(color);
 	}
-
+	while( (SPI2->SR & (1<<7)) != 0);
 	DISP_CS_1;
 	// adding this below works for 18-bit per pixel, but not a delay or extra SPI writes...WTF???
 	// gc9a01_set_addr_window(x, y, x, y);
@@ -147,7 +137,7 @@ void gc9a01_draw_bit_canvas(uint8_t *canvas, uint16_t x0, uint16_t y0, uint16_t 
 	DISP_DC_1;
 	for(uint32_t y=0;y<h;y++){
 		for(uint32_t x=0;x<w;x++){
-			currBitColor = canvas[(y*(w/8)) + (x / 8)];
+			currBitColor = canvas[(y*(w >> 3)) + (x >> 3)];
 			currBitColor &= 1 << (x & 0b111);
 			if(currBitColor == 0){
 				gc9a01_send_color(0);
@@ -157,6 +147,7 @@ void gc9a01_draw_bit_canvas(uint8_t *canvas, uint16_t x0, uint16_t y0, uint16_t 
 			}
 		}
 	}
+	while( (SPI2->SR & (1<<7)) != 0);
 	DISP_CS_1;
 }
 
@@ -170,6 +161,7 @@ void gc9a01_vert_line(uint16_t x, uint16_t y0, uint16_t y1, uint32_t color){
 	for(int i=0;i<y1-y0;i++){
 		gc9a01_send_color(color);
 	}
+	while( (SPI2->SR & (1<<7)) != 0);
 	DISP_CS_1;
 }
 
@@ -235,7 +227,7 @@ void gc9a01_fill_screen(uint32_t color){
 void gc9a01_print_text(const char *text,
 					   uint16_t x, uint16_t y,
 					   uint16_t color, uint16_t bgColor,
-					   alignment_e alignMode, boundingBox_t *textBox,
+					   gc9a01_align_e alignMode, boundingBox_t *textBox,
 					   uint8_t fontWidth, uint8_t fontHeight, const uint32_t *fontLut){
 	char currText;
 	uint32_t toSend;
@@ -281,6 +273,7 @@ void gc9a01_print_text(const char *text,
 			}
 		}
 	}
+	while( (SPI2->SR & (1<<7)) != 0);
 	DISP_CS_1;
 
 	// revert to original access control method
@@ -290,19 +283,19 @@ void gc9a01_print_text(const char *text,
 void gc9a01_print_text_big(const char *text,
 					   uint16_t x, uint16_t y,
 					   uint16_t color, uint16_t bgColor,
-					   alignment_e alignMode, boundingBox_t *textBox){
+					   gc9a01_align_e alignMode, boundingBox_t *textBox){
 	gc9a01_print_text(text, x, y, color, bgColor, alignMode, textBox, 16, 32, spleenFont32);
 }
 void gc9a01_print_text_med(const char *text, 
 					   uint16_t x, uint16_t y,
 					   uint16_t color, uint16_t bgColor,
-					   alignment_e alignMode, boundingBox_t *textBox){	
+					   gc9a01_align_e alignMode, boundingBox_t *textBox){	
 	gc9a01_print_text(text, x, y, color, bgColor, alignMode, textBox, 12, 24, spleenFont24);
 }
 void gc9a01_print_text_sma(const char *text, 
 					   uint16_t x, uint16_t y,
 					   uint16_t color, uint16_t bgColor,
-					   alignment_e alignMode, boundingBox_t *textBox){	
+					   gc9a01_align_e alignMode, boundingBox_t *textBox){	
 	gc9a01_print_text(text, x, y, color, bgColor, alignMode, textBox, 8, 16, spleenFont16);
 }
 
