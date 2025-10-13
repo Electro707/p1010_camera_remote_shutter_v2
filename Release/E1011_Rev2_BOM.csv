@@ -1,0 +1,42 @@
+Qty,Reference,Part Number,Manufacturer,Description,Value
+1,BT2,B2B-PH-K-S,JST,"Header, 2POS",
+1,C1,,-,"SMD Capacitor, 10pF, 0805",10pF
+4,"C2,C6,C14,C18",,-,"SMD Capacitor, 1pF, 0805",1pF
+6,"C3,C5,C11,C12,C17,C20",,-,"SMD Capacitor, 0.1uF, 0805",0.1uF
+2,"C4,C13",,-,"SMD Capacitor, 10uF, 0805",10uF
+1,C7,,-,"SMD Capacitor, 1uF, 0805",1uF
+1,C8,,-,"SMD Capacitor, 4.7uF, 0805",4.7uF
+3,"C9,C10,C19",,-,"SMD Capacitor, 10nF, 0805",10nF
+1,D1,PDB-C156,Advanced Photonix,Photodiode,
+1,D4,ESD5Z5.0T1G,OnSemi,TVS Diode,
+1,F2,0ZCJ0050FF2G,Bel Fuse Inc,"Polyfuse, 500mA",
+1,FB1,BLM21AG102SN1D,MURATA,Ferrite Bead,
+2,"J1, J6",SJ-2509N,Same Sky,"Conn, TRS",
+1,J2,-,-,"Header, Generic 0.1"" 2POS",
+1,J4,MTJ-660X1,Adam Tech,"Header, RJ12",
+1,J8,USB4085,CGT,"Conn, USB-C",
+1,MK1,POM-3535P-3-R,PUI Audio,Microphone,
+2,"Q3,Q4",MMBF170,OnSemi,NPN Transistor,
+3,"R1,R21,R22",-,-,"SMD Resistor, 0, 0805",0
+2,"R2,R8",-,-,"SMD Resistor, 100k, 0805",100k
+13,"R5,R25,R27,R29,R30,R34,R36,R38,R39,R42,R45,R49,R50",-,-,"SMD Resistor, 1k, 0805",1k
+13,"R6,R7,R9,R14,R19,R28,R31,R32,R33,R35,R37,R41,R48",-,-,"SMD Resistor, 10k, 0805",10k
+1,R10,-,-,"SMD Resistor, 200k, 0805",200k
+1,R13,-,-,"SMD Resistor, 2.2k, 0805",2.2k
+3(DNP),"R16,R24,R53",-,-,"SMD Resistor, 0, 0805",0
+2,"R17,R18",-,-,"SMD Resistor, 5.1k, 0805",5.1k
+1(DNP),R23,-,-,"SMD Resistor, x, 0805",x
+1,R26,-,-,"SMD Resistor, 1.3k, 0805",1.3k
+1,R40,-,-,"SMD Resistor, 100, 0805",100
+1(DNP),R43,-,-,"SMD Resistor, 10k, 0805",10k
+1,R51,-,-,"SMD Resistor, 500k, 0805",500k
+1,R52,-,-,"SMD Resistor, 1M, 0805",1M
+3,"SW1,SW2,SW3",-,-,Generic 6x6mm Pushbutton,
+1,SW5,PEC12R-4020F-S0024,Bourns Inc.,No-Detect Rotary Encoder,
+1,U1,STM32G071K8Tx,ST,"IC, Microcontroller",
+2,"U2,U8",LTV-356T,Lite-On Inc,"IC, Octo-Coupler",
+1,U3,ER-TFTM1.28-1,BuyDisplay,Round LCD Display,
+1,U4,BQ24072RGT,TI,"IC, Battery Manager",
+1,U5,OPA2607,TI,"IC, OpAmp, Low Input Current",
+1,U6,TS5A3357,TI,"IC, Analog Switch",
+1,U9,TLV75733PDBV,TI,"IC, Linear Regulator",
