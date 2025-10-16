@@ -11,7 +11,7 @@ Currently working on Rev 2, which is smaller and fixed some issues with V1
 - `CAD`: FreeCAD enclosure and models
     - C1013: Bottom half of enclosure
     - C1014: Top half of enclosure
-- `Firmware`: Firmware. Currently contains only test firmware
+- `Firmware`: Firmware. Currently contains the main and misc test firmwares
 - `PCB`: KiCAD PCB Files
     - E1011: PCB
 - `Release`: Locked in "released" files, such as Schematics, Gerbers, etc
@@ -21,7 +21,23 @@ Currently working on Rev 2, which is smaller and fixed some issues with V1
 All hardware erratas and potential work-arounds are documented in [ERRATA.md](ERRATA.md)
 
 ## Firmware
-WIP, currently only test firmware exists
+The firmware, located in `Firmware/F1012_Main`, is the firmware for this project.
+
+The firwmare requires [stm32-cmake by ObKo](https://github.com/ObKo/stm32-cmake) to be installed somewhere in your system, as well as [stm32's G0's firmware package](https://github.com/STMicroelectronics/STM32CubeG0).
+The paths `CMAKE_TOOLCHAIN_FILE` and `STM32_CUBE_G0_PATH` must be set to the path of the installed dependencies above, respectivally.
+Eventually I plan on having them be easily configured, but need to figure out the best way of approaching that.
+
+It can be build with cmake as follows in the firmware directory:
+```bash
+mkdir -p build; cd build
+cmake ../
+make
+```
+
+The firmware can then be flashed with the custom command
+```bash
+make flash
+```
 
 ### Setup
 This project uses [stm32-cmake](https://github.com/ObKo/stm32-cmake) in the build process, so you must set it up and change the `CMAKE_TOOLCHAIN_FILE` variable in each firmware's CMAKE file. You must also download [STM32G0's MCU Package](https://github.com/STMicroelectronics/STM32CubeG0) and set the `STM32_CUBE_G0_PATH` variable to the download location.

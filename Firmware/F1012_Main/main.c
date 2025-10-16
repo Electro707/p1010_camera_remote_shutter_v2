@@ -2,6 +2,9 @@
  * Main F1012 Firmware
  *
  * This runs on an STM32G071K8Tx
+ *
+ * TODO:
+ *		- have all values, instead of floats, be in mS increments (or more), and have a custom print function
  */
 #include "stm32g0xx.h"
 #include "stm32g0xx_ll_rcc.h"
@@ -28,8 +31,8 @@ typedef enum{
 
 // to keep track of what we are selecting through UI
 typedef enum{
-	VAR_SHUTTER_TIME = 0,
-	VAR_TRIG_TIME,
+	VAR_TRIG_TIME = 0,
+	VAR_SHUTTER_TIME,
 	VAR_TIMELAPSE_N,
 	VAR_TIMELAPSE_DUR,
 	VAR_END,
@@ -46,8 +49,8 @@ typedef enum{
 
 // trigger configs
 struct config_s{
+	float shutterDelay;			// sec, the time from trigger to shutter open
 	float shutterSpeed;			// sec, the shutter speed
-	float timeToTrig;			// sec, the time from trigger to shutter open
 	int timelapseNPics;		    // n, number of pictures to take in trigger time. Set to -1 for infinite
 	float timelapseInterval;	// sec, timelapse interval between different pictures 
 };
@@ -226,9 +229,26 @@ void adcCal(void){
 	ADC1->CALFACT = cal;
 }
 
-const char *varTexts[VAR_END] = {"Shutter Time:", "Time To Trig:", "N Pics:", "Interval:"};
+const char *varTexts[VAR_END] = {"Shutter delay:", "Shutter Time:", "Timelapse #Pics:", "Timelapse Delay:"};
 
-void drawHomeScreenValues(void){
+void drawHomeScreenValuesSingle(int index, char *toWrite){
+	uint y = 50 + 32*index;
+	uint32_t fg = gc9a01_color_white;
+	uint32_t bg = gc9a01_color_black;
+
+	// select if highlighted based off if selected
+	if(state == STATE_EDITING_VAR && selectedElem == index){
+		fg = gc9a01_color_black;
+		bg = gc9a01_color_white;
+	}
+	else {
+		fg = gc9a01_color_white;
+		bg = gc9a01_color_black;
+	}
+
+	gc9a01_print_text_sma(toWrite, 205, y, fg, bg, ALIGN_RIGHT, NULL);
+}
+void drawHomeScreenValuesAll(void){
 	char nStr[10];
 	int varI;
 	float varF;
@@ -249,19 +269,19 @@ void drawHomeScreenValues(void){
 		switch(i){
 			case VAR_SHUTTER_TIME:
 				varF = conf.shutterSpeed;
-				npf_snprintf(nStr, 10, "%6.2f", varF);
+				npf_snprintf(nStr, 10, "%5.2f", varF);
 				break;
 			case VAR_TRIG_TIME:
-				varF = conf.timeToTrig;
-				npf_snprintf(nStr, 10, "%6.2f", varF);
+				varF = conf.shutterDelay;
+				npf_snprintf(nStr, 10, "%5.2f", varF);
 				break;
 			case VAR_TIMELAPSE_N:
 				varI = conf.timelapseNPics;
-				npf_snprintf(nStr, 10, "%6d", varI);
+				npf_snprintf(nStr, 10, "%5d", varI);
 				break;
 			case VAR_TIMELAPSE_DUR:
 				varF = conf.timelapseInterval;
-				npf_snprintf(nStr, 10, "%6.2f", varF);
+				npf_snprintf(nStr, 10, "%5.2f", varF);
 				break;
 			default:
 				break;
@@ -394,10 +414,11 @@ void setStateMachine(stateMachine_e newState){
 
 	state = newState;
 	drawHomeScreenElements();
-	drawHomeScreenValues();
+	drawHomeScreenValuesAll();
 }
 
 int main(void){
+	char tmpS[16];
 	int encoderDelta;			// delta of reading since last to current reading
 	int encoderPostDivDelta;	// counter after dividing down the counter for not-so fine interval
 	
@@ -410,8 +431,8 @@ int main(void){
 
 	memset(&conf, 0, sizeof(conf));
 	conf.timelapseInterval = 1.0;
-	conf.timeToTrig = 1.0;
-	conf.shutterSpeed = 1.0;
+	conf.shutterDelay = DEFAULT_SHUTTER_DELAY;
+	conf.shutterSpeed = DEFAULT_SHUTTER_TIME;
 	memset(&encoderBt, 0, sizeof(encoderBt));
 	selectedElem = HOME_ELE_SHUTTER_TIME;
 
@@ -432,7 +453,7 @@ int main(void){
 
 	state = STATE_STANDBY;
 	drawHomeScreenElements();
-	drawHomeScreenValues();
+	drawHomeScreenValuesAll();
 	for(EVER){
 		// handle if we move the encoder
 		if(lastEncoderState != TIM1->CNT){
@@ -470,8 +491,8 @@ int main(void){
 								if(conf.shutterSpeed < 1.0){conf.shutterSpeed = 1.0;}
 								break;
 							case VAR_TRIG_TIME:
-								conf.timeToTrig += encoderPostDivDelta;
-								if(conf.timeToTrig < 1.0){conf.timeToTrig = 1.0;}
+								conf.shutterDelay += encoderPostDivDelta;
+								if(conf.shutterDelay < 1.0){conf.shutterDelay = 1.0;}
 								break;
 							case VAR_TIMELAPSE_N:
 								conf.timelapseNPics += encoderPostDivDelta;
@@ -485,7 +506,7 @@ int main(void){
 								break;
 						}
 					}
-					drawHomeScreenValues();
+					drawHomeScreenValuesAll();
 					break;
 				default:
 					break;
@@ -496,19 +517,24 @@ int main(void){
 
 		switch(state){
 			case STATE_ARMED:
-				if(trigUpdateLcd){		// update as needed
-					drawHomeProgressUpdate(VAR_TRIG_TIME, currentTrigTime / conf.timeToTrig);
-				}
-				if(currentTrigTime > conf.timeToTrig){
+				if(currentTrigTime > conf.shutterDelay){
 					setStateMachine(STATE_TRIG);
+				}
+				else if(trigUpdateLcd){		// update as needed
+					drawHomeProgressUpdate(VAR_TRIG_TIME, currentTrigTime / conf.shutterDelay);
+					// todo: bug where this, for a very small period of time, goes to zero
+					npf_snprintf(tmpS, 16, "%5.2f", conf.shutterDelay - currentTrigTime);
+					drawHomeScreenValuesSingle(VAR_TRIG_TIME, tmpS);
 				}
 				break;
 			case STATE_TRIG:
-				if(trigUpdateLcd){		// update as needed
-					drawHomeProgressUpdate(VAR_SHUTTER_TIME, currentTrigTime / conf.shutterSpeed);
-				}
 				if(currentTrigTime > conf.shutterSpeed){
 					setStateMachine(STATE_STANDBY);
+				}
+				else if(trigUpdateLcd){		// update as needed
+					drawHomeProgressUpdate(VAR_SHUTTER_TIME, currentTrigTime / conf.shutterSpeed);
+					npf_snprintf(tmpS, 16, "%5.2f", conf.shutterSpeed - currentTrigTime);
+					drawHomeScreenValuesSingle(VAR_SHUTTER_TIME, tmpS);
 				}
 				break;
 			default:
@@ -571,16 +597,13 @@ int main(void){
 void TIM14_IRQHandler(void){
 	static uint lastLcdUpdate = 0;			// last time since we updated the lcd
 	uint buttonState;
+
 	TIM14->SR = 0;		// clear pending interrupt
 
-	// if(trigUpdateLcd == false){
-	if(lastLcdUpdate >= 50){
+	if(++lastLcdUpdate >= 50){
 		trigUpdateLcd = true;
 		lastLcdUpdate = 0;
-	}else{
-		lastLcdUpdate++;
 	}
-	// }
 
 	// if we pressed the encoder button
 	buttonState = (GPIOB->IDR & (1 << 1)) == 0;		// true if pressed, false if not
