@@ -22,6 +22,7 @@
 // how many 10 second increments before we auto-shutdown
 // #define AUTO_SHUTDOWN_INTERVAL		3		// 30 seconds
 #define AUTO_SHUTDOWN_INTERVAL		60		// 600 seconds
+#define SCREENSAVER_INTERVAL        2       // 20 seconds
 
 #define BUTTON_VALID_PERIOD_TICK    10       // tick (mS), how long to validate a button press/depress
 

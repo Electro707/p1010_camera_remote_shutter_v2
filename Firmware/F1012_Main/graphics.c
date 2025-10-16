@@ -86,7 +86,7 @@ void line_draw_vert_abstract(uint8_t *canvasBuff, uint16_t canvasW, uint16_t x, 
 	int16_t canvasIdx;
 
 	for(int y=0;y<h;y++){
-		canvasIdx = (y*canvasW) + x / 8;
+		canvasIdx = (y*canvasW) + (x >> 3);
 		canvasBuff[canvasIdx] |= 1 << (x & 0b111);
 	}
 }
@@ -106,7 +106,7 @@ void line_draw_abstract(uint8_t *canvasBuff, uint16_t canvasW, uint16_t x0, uint
 	int16_t canvasIdx;
 
     while(1){
-        canvasIdx = (y0*canvasW) + x0 / 8;
+        canvasIdx = (y0*canvasW) + (x0 >> 3);
         if(canvasIdx < 0){
             canvasIdx = 0;
         }

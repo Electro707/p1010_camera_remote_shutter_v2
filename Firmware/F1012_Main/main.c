@@ -18,6 +18,7 @@
 #include "nanoprintf.h"
 #include "graphics.h"
 #include "font.h"
+#include "screensaver.h"
 
 // run-time modes
 typedef enum{
@@ -26,6 +27,7 @@ typedef enum{
 	STATE_EDITING_VAR,	// editing variable in UI
 	STATE_ARMED,		// armed, waiting to take picture
 	STATE_TRIG,			// camera triggered
+	STATE_SCREENSAVER,	// screen saver state
 	STATE_SHUTDOWN		// shutdown
 }stateMachine_e;
 
@@ -123,6 +125,8 @@ void initMcu(void){
 	// enable clock for port a, b, and c
 	RCC->IOPENR |= RCC_IOPENR_GPIOAEN | RCC_IOPENR_GPIOBEN | RCC_IOPENR_GPIOCEN;
 
+	// PA4 (BT1) - input
+	// PA5 (BT2)) - inpuit
 	// PA6 (Trig_1) - output
 	// PA7 (CAM_TRIG) - output
 	// PA8 (ROT_A) - alternate
@@ -133,11 +137,11 @@ void initMcu(void){
 	// PA13 (SWDIO) - alternate
 	// PA14 (SWCLK) - alternate
 	// PA15 (LCB_BLK) - output
-	GPIOA->MODER = 0x695a5fff;
+	GPIOA->MODER = 0x695a50ff;
 	GPIOA->AFR[1] |= 0x22;              // A8 and A9 -> AF2 (Timer 1 inputs)
 
 	// port b output
-	// PB1 (ROT_S) -> Switch rotation
+	// PB1 (ROT_S) -> input
 	// PB4 (LCD_CS) -> output
 	// PB5 (LCD_DC) -> output
 	// PB6 (LCD_RES) -> output
@@ -412,9 +416,16 @@ void setStateMachine(stateMachine_e newState){
 		holdEncoderWaitForDepress = true;
 	}
 
+	if(state == STATE_SCREENSAVER || newState == STATE_SCREENSAVER){
+		gc9a01_fill_screen(gc9a01_color_black);
+	}
+
 	state = newState;
-	drawHomeScreenElements();
-	drawHomeScreenValuesAll();
+	if(state != STATE_SCREENSAVER){
+		drawHomeScreenElements();
+		drawHomeScreenValuesAll();
+	}
+
 }
 
 int main(void){
@@ -456,6 +467,7 @@ int main(void){
 	drawHomeScreenValuesAll();
 	for(EVER){
 		// handle if we move the encoder
+		// todo: move this logic inside the giant state handler
 		if(lastEncoderState != TIM1->CNT){
 			encoderDelta = TIM1->CNT - lastEncoderState;
 			lastEncoderState = TIM1->CNT;
@@ -508,6 +520,9 @@ int main(void){
 					}
 					drawHomeScreenValuesAll();
 					break;
+				case STATE_SCREENSAVER:
+					setStateMachine(STATE_STANDBY);
+					break;
 				default:
 					break;
 			}
@@ -516,15 +531,64 @@ int main(void){
 		}
 
 		switch(state){
+			case STATE_STANDBY:
+				if(autoShutdownTimer >= SCREENSAVER_INTERVAL){
+					setStateMachine(STATE_SCREENSAVER);
+				}
+				if(encoderBt.pressedTrig == true){
+					encoderBt.pressedTrig = false;
+					if(selectedElem != HOME_ELE_START_BT){
+						setStateMachine(STATE_EDITING_VAR);
+					}
+				}
+				if(encoderBt.depressedTrig == true){
+					holdEncoderWaitForDepress = false;
+					encoderBt.depressedTrig = false;
+					if(selectedElem == HOME_ELE_START_BT){
+						drawHomeScreenElementsStartBt();
+					}
+				}
+				if(!holdEncoderWaitForDepress && encoderBt.pressedDur){
+					if(selectedElem == HOME_ELE_START_BT){
+						drawHomeScreenElementsStartBtProg(encoderBt.pressedDur / (float)START_BUTTON_PRESS_DUR);
+						if(encoderBt.pressedDur >= START_BUTTON_PRESS_DUR){
+							setStateMachine(STATE_ARMED);
+						}
+					}
+				}
+				break;
+			case STATE_EDITING_VAR:
+				if(autoShutdownTimer >= SCREENSAVER_INTERVAL){
+					setStateMachine(STATE_SCREENSAVER);
+				}
+				if(encoderBt.pressedTrig == true){
+					encoderBt.pressedTrig = false;
+					setStateMachine(STATE_STANDBY);
+				}
+				break;
 			case STATE_ARMED:
 				if(currentTrigTime > conf.shutterDelay){
 					setStateMachine(STATE_TRIG);
 				}
 				else if(trigUpdateLcd){		// update as needed
+					trigUpdateLcd = false;
 					drawHomeProgressUpdate(VAR_TRIG_TIME, currentTrigTime / conf.shutterDelay);
 					// todo: bug where this, for a very small period of time, goes to zero
 					npf_snprintf(tmpS, 16, "%5.2f", conf.shutterDelay - currentTrigTime);
 					drawHomeScreenValuesSingle(VAR_TRIG_TIME, tmpS);
+				}
+				
+				if(encoderBt.depressedTrig == true){
+					holdEncoderWaitForDepress = false;
+					encoderBt.depressedTrig = false;
+					drawHomeScreenElementsStartBt();
+				}
+
+				if(!holdEncoderWaitForDepress && encoderBt.pressedDur){
+					drawHomeScreenElementsStartBtProg(encoderBt.pressedDur / (float)STOP_BUTTON_PRESS_DUR);
+					if(encoderBt.pressedDur >= STOP_BUTTON_PRESS_DUR){
+						setStateMachine(STATE_STANDBY);
+					}
 				}
 				break;
 			case STATE_TRIG:
@@ -532,61 +596,44 @@ int main(void){
 					setStateMachine(STATE_STANDBY);
 				}
 				else if(trigUpdateLcd){		// update as needed
+					trigUpdateLcd = false;
 					drawHomeProgressUpdate(VAR_SHUTTER_TIME, currentTrigTime / conf.shutterSpeed);
 					npf_snprintf(tmpS, 16, "%5.2f", conf.shutterSpeed - currentTrigTime);
 					drawHomeScreenValuesSingle(VAR_SHUTTER_TIME, tmpS);
+				}
+
+				if(encoderBt.depressedTrig == true){
+					holdEncoderWaitForDepress = false;
+					encoderBt.depressedTrig = false;
+					drawHomeScreenElementsStartBt();
+				}
+
+				if(!holdEncoderWaitForDepress && encoderBt.pressedDur){
+					drawHomeScreenElementsStartBtProg(encoderBt.pressedDur / (float)STOP_BUTTON_PRESS_DUR);
+					if(encoderBt.pressedDur >= STOP_BUTTON_PRESS_DUR){
+						setStateMachine(STATE_STANDBY);
+					}
+				}
+				break;
+			case STATE_SCREENSAVER:
+				// if(trigUpdateLcd){		// update as needed
+					// trigUpdateLcd = false;
+					serviceScreenSaver();
+				// }
+				if(autoShutdownTimer >= AUTO_SHUTDOWN_INTERVAL){
+					// setStateMachine(STATE_SHUTDOWN);		// explicit state transition not needed, end of device
+					shutdownDevice();
+				}
+				if(encoderBt.pressedTrig == true){
+					encoderBt.pressedTrig = false;
+					setStateMachine(STATE_STANDBY);
 				}
 				break;
 			default:
 				break;
 		}
-
-		// if we press on encoder button
-		if(encoderBt.pressedTrig == true){
-			encoderBt.pressedTrig = false;
-			if(state == STATE_STANDBY){
-				if(selectedElem != HOME_ELE_START_BT){
-					setStateMachine(STATE_EDITING_VAR);
-				}
-			}
-			else if(state == STATE_EDITING_VAR){
-				setStateMachine(STATE_STANDBY);
-			}
-			
-			autoShutdownService();
-		}
-
-		// handle if we depress the encoder (for now just redraws the screen)
-		if(encoderBt.depressedTrig == true){
-			encoderBt.depressedTrig = false;
-			holdEncoderWaitForDepress = false;
-			if(state == STATE_STANDBY && selectedElem == HOME_ELE_START_BT){
-				drawHomeScreenElementsStartBt();
-			}
-			else if(state == STATE_ARMED || state == STATE_TRIG){
-				drawHomeScreenElementsStartBt();
-			}
-			autoShutdownService();
-		}
-
-		// if we are holding the button, redraw as needed
-		if(!holdEncoderWaitForDepress && encoderBt.pressedDur){
-			if(state == STATE_STANDBY && selectedElem == HOME_ELE_START_BT){
-				drawHomeScreenElementsStartBtProg(encoderBt.pressedDur / (float)START_BUTTON_PRESS_DUR);
-				if(encoderBt.pressedDur >= START_BUTTON_PRESS_DUR){
-					setStateMachine(STATE_ARMED);
-				}
-			}
-			else if(state == STATE_ARMED || state == STATE_TRIG){
-				drawHomeScreenElementsStartBtProg(encoderBt.pressedDur / (float)STOP_BUTTON_PRESS_DUR);
-				if(encoderBt.pressedDur >= STOP_BUTTON_PRESS_DUR){
-					setStateMachine(STATE_STANDBY);
-				}
-			}
-			autoShutdownService();
-		}
-
 	}
+
 	return 0;
 }
 
@@ -633,6 +680,7 @@ void buttonPressHandler(struct button_s *bt, uint buttonState){
 					bt->depressedTrig = true;
 				}
 				bt->pressedDur = 0;
+				autoShutdownService();
 			}
 		}
 	}
@@ -643,6 +691,7 @@ void buttonPressHandler(struct button_s *bt, uint buttonState){
 		}
 		else if(buttonState){		// if are held high for 
 			bt->pressedDur++;
+			autoShutdownService();
 		}
 	}
 	bt->lastState = buttonState;
@@ -651,13 +700,7 @@ void buttonPressHandler(struct button_s *bt, uint buttonState){
 // called once every 10 seconds
 void TIM6_DAC_LPTIM1_IRQHandler(void){
 	TIM6->SR = 0;	// clear pending interrupt
-	
-	if(state == STATE_STANDBY){
-		autoShutdownTimer += 1;
-		if(autoShutdownTimer > AUTO_SHUTDOWN_INTERVAL){
-			shutdownDevice();
-		}
-	}
+	autoShutdownTimer += 1;
 }
 
 // service to clear the auto-shutdown timer

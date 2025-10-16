@@ -33,6 +33,12 @@ void gc9a01_send_color(uint32_t rgbParsed){
 	SPI_Write_Byte(rgbParsed & 0xFF);
 }
 
+// todo: move all functions to use this eventually, but must check at end of loop if finished with SPI or not
+void gc9a01_send_color_noWait(uint32_t rgbParsed){
+	LL_SPI_TransmitData8(SPI2, (rgbParsed >> 8)); while( (SPI2->SR & (0b11<<11)) == (0b11 << 11));
+	LL_SPI_TransmitData8(SPI2, rgbParsed & 0xFF); while( (SPI2->SR & (0b11<<11)) == (0b11 << 11));
+}
+
 uint32_t gc9a01_full_rgb_conv(uint8_t r, uint8_t g, uint8_t b){
 	r <<= 2;
 	g <<= 2;
@@ -150,13 +156,14 @@ void gc9a01_draw_bit_canvas(uint8_t *canvas, uint16_t x0, uint16_t y0, uint16_t 
 			currBitColor = canvas[(y*(w/8)) + (x / 8)];
 			currBitColor &= 1 << (x & 0b111);
 			if(currBitColor == 0){
-				gc9a01_send_color(0);
+				gc9a01_send_color_noWait(0);
 			}
 			else {
-				gc9a01_send_color(color);
+				gc9a01_send_color_noWait(color);
 			}
 		}
 	}
+	while( (SPI2->SR & (1<<7)) != 0);
 	DISP_CS_1;
 }
 
