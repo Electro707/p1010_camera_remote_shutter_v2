@@ -27,6 +27,7 @@ typedef enum{
 	STATE_EDITING_VAR,	// editing variable in UI
 	STATE_ARMED,		// armed, waiting to take picture
 	STATE_TRIG,			// camera triggered
+	STATE_TIMELAPSE,	// doing timelapse
 	STATE_SCREENSAVER,	// screen saver state
 	STATE_SHUTDOWN		// shutdown
 }stateMachine_e;
@@ -328,6 +329,7 @@ void drawHomeScreenElementsStartBtProg(float prog){
 			break;
 		case STATE_TRIG:
 		case STATE_ARMED:
+		case STATE_TIMELAPSE:
 			fg = 0xfb28;
 			canvas_print_text(buttonCanvas, canvasW, "STOP", 32, 10, ALIGN_CENTER, 8, 16, spleenFont16);
 			break;
@@ -414,6 +416,7 @@ void setStateMachine(stateMachine_e newState){
 
 	if(state == STATE_STANDBY || newState == STATE_STANDBY){
 		holdEncoderWaitForDepress = true;
+		autoShutdownService();
 	}
 
 	if(state == STATE_SCREENSAVER || newState == STATE_SCREENSAVER){
@@ -466,67 +469,11 @@ int main(void){
 	drawHomeScreenElements();
 	drawHomeScreenValuesAll();
 	for(EVER){
-		// handle if we move the encoder
-		// todo: move this logic inside the giant state handler
+		// record the delta rotary encoder counts if we rotated the encoder
 		if(lastEncoderState != TIM1->CNT){
 			encoderDelta = TIM1->CNT - lastEncoderState;
 			lastEncoderState = TIM1->CNT;
 			encoderCnt += encoderDelta;
-
-			switch(state){
-				case STATE_STANDBY:
-					if(encoderCnt > 4){
-						encoderCnt = 0;
-						if(selectedElem != (HOME_ELE_END-1)){selectedElem++;}
-						drawHomeScreenElements();
-					}
-					else if(encoderCnt < -4){
-						encoderCnt = 0;
-						if(selectedElem != 0){selectedElem--;}
-						drawHomeScreenElements();
-					}
-					// lastSelectedElem = selectedElem;
-					break;
-				case STATE_EDITING_VAR:
-					encoderPostDivDelta = 0;
-					if(encoderCnt > 4){
-						encoderCnt = 0;
-						encoderPostDivDelta = 1;
-					} else if(encoderCnt < -4){
-						encoderCnt = 0;
-						encoderPostDivDelta = -1;
-					}
-					if(encoderPostDivDelta){
-						switch(selectedElem){
-							case VAR_SHUTTER_TIME:
-								conf.shutterSpeed += encoderPostDivDelta;
-								if(conf.shutterSpeed < 1.0){conf.shutterSpeed = 1.0;}
-								break;
-							case VAR_TRIG_TIME:
-								conf.shutterDelay += encoderPostDivDelta;
-								if(conf.shutterDelay < 1.0){conf.shutterDelay = 1.0;}
-								break;
-							case VAR_TIMELAPSE_N:
-								conf.timelapseNPics += encoderPostDivDelta;
-								if(conf.timelapseNPics < -1){conf.timelapseNPics = -1;}
-								break;
-							case VAR_TIMELAPSE_DUR:
-								conf.timelapseInterval += encoderPostDivDelta;
-								if(conf.timelapseInterval < 1.0){conf.timelapseInterval = 1.0;}
-								break;
-							default:
-								break;
-						}
-					}
-					drawHomeScreenValuesAll();
-					break;
-				case STATE_SCREENSAVER:
-					setStateMachine(STATE_STANDBY);
-					break;
-				default:
-					break;
-			}
-
 			autoShutdownService();
 		}
 
@@ -556,6 +503,18 @@ int main(void){
 						}
 					}
 				}
+
+				if(encoderCnt > 4){
+					encoderCnt = 0;
+					if(selectedElem != (HOME_ELE_END-1)){selectedElem++;}
+					drawHomeScreenElements();
+				}
+				else if(encoderCnt < -4){
+					encoderCnt = 0;
+					if(selectedElem != 0){selectedElem--;}
+					drawHomeScreenElements();
+				}
+
 				break;
 			case STATE_EDITING_VAR:
 				if(autoShutdownTimer >= SCREENSAVER_INTERVAL){
@@ -565,13 +524,45 @@ int main(void){
 					encoderBt.pressedTrig = false;
 					setStateMachine(STATE_STANDBY);
 				}
+
+				encoderPostDivDelta = 0;
+				if(encoderCnt > 4){
+					encoderCnt = 0;
+					encoderPostDivDelta = 1;
+				} else if(encoderCnt < -4){
+					encoderCnt = 0;
+					encoderPostDivDelta = -1;
+				}
+				if(encoderPostDivDelta){
+					switch(selectedElem){
+						case VAR_SHUTTER_TIME:
+							conf.shutterSpeed += encoderPostDivDelta;
+							if(conf.shutterSpeed < 1.0){conf.shutterSpeed = 1.0;}
+							break;
+						case VAR_TRIG_TIME:
+							conf.shutterDelay += encoderPostDivDelta;
+							if(conf.shutterDelay < 1.0){conf.shutterDelay = 1.0;}
+							break;
+						case VAR_TIMELAPSE_N:
+							conf.timelapseNPics += encoderPostDivDelta;
+							if(conf.timelapseNPics < -1){conf.timelapseNPics = -1;}
+							break;
+						case VAR_TIMELAPSE_DUR:
+							conf.timelapseInterval += encoderPostDivDelta;
+							if(conf.timelapseInterval < 1.0){conf.timelapseInterval = 1.0;}
+							break;
+						default:
+							break;
+					}
+					drawHomeScreenValuesAll();
+				}
+
 				break;
 			case STATE_ARMED:
 				if(currentTrigTime > conf.shutterDelay){
 					setStateMachine(STATE_TRIG);
 				}
-				else if(trigUpdateLcd){		// update as needed
-					trigUpdateLcd = false;
+				else{
 					drawHomeProgressUpdate(VAR_TRIG_TIME, currentTrigTime / conf.shutterDelay);
 					// todo: bug where this, for a very small period of time, goes to zero
 					npf_snprintf(tmpS, 16, "%5.2f", conf.shutterDelay - currentTrigTime);
@@ -593,10 +584,17 @@ int main(void){
 				break;
 			case STATE_TRIG:
 				if(currentTrigTime > conf.shutterSpeed){
-					setStateMachine(STATE_STANDBY);
+					if(conf.timelapseNPics == -1){
+						setStateMachine(STATE_TIMELAPSE);
+					}
+					else if(--conf.timelapseNPics < 0){
+						setStateMachine(STATE_STANDBY);
+					}
+					else{
+						setStateMachine(STATE_TIMELAPSE);
+					}
 				}
-				else if(trigUpdateLcd){		// update as needed
-					trigUpdateLcd = false;
+				else{
 					drawHomeProgressUpdate(VAR_SHUTTER_TIME, currentTrigTime / conf.shutterSpeed);
 					npf_snprintf(tmpS, 16, "%5.2f", conf.shutterSpeed - currentTrigTime);
 					drawHomeScreenValuesSingle(VAR_SHUTTER_TIME, tmpS);
@@ -615,17 +613,43 @@ int main(void){
 					}
 				}
 				break;
+			case STATE_TIMELAPSE:
+				if(currentTrigTime > conf.timelapseInterval){
+					setStateMachine(STATE_TRIG);
+				}
+				else{		// update as needed
+					drawHomeProgressUpdate(VAR_TIMELAPSE_DUR, currentTrigTime / conf.timelapseInterval);
+					npf_snprintf(tmpS, 16, "%5.2f", conf.timelapseInterval - currentTrigTime);
+					drawHomeScreenValuesSingle(VAR_TIMELAPSE_DUR, tmpS);
+				}
+
+				if(encoderBt.depressedTrig == true){
+					holdEncoderWaitForDepress = false;
+					encoderBt.depressedTrig = false;
+					drawHomeScreenElementsStartBt();
+				}
+
+				if(!holdEncoderWaitForDepress && encoderBt.pressedDur){
+					drawHomeScreenElementsStartBtProg(encoderBt.pressedDur / (float)STOP_BUTTON_PRESS_DUR);
+					if(encoderBt.pressedDur >= STOP_BUTTON_PRESS_DUR){
+						setStateMachine(STATE_STANDBY);
+					}
+				}
+				break;
 			case STATE_SCREENSAVER:
-				// if(trigUpdateLcd){		// update as needed
-					// trigUpdateLcd = false;
+				if(trigUpdateLcd){		// update as needed
+					trigUpdateLcd = false;
 					serviceScreenSaver();
-				// }
+				}
 				if(autoShutdownTimer >= AUTO_SHUTDOWN_INTERVAL){
 					// setStateMachine(STATE_SHUTDOWN);		// explicit state transition not needed, end of device
 					shutdownDevice();
 				}
 				if(encoderBt.pressedTrig == true){
 					encoderBt.pressedTrig = false;
+					setStateMachine(STATE_STANDBY);
+				}
+				if(encoderCnt){
 					setStateMachine(STATE_STANDBY);
 				}
 				break;
