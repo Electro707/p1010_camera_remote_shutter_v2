@@ -13,7 +13,6 @@
 #include "gc9a01.h"
 #include "config.h"
 #include <stddef.h>
-#include <stdlib.h>
 #include <string.h>
 #include "nanoprintf.h"
 #include "graphics.h"
@@ -32,20 +31,13 @@ typedef enum{
 	STATE_SHUTDOWN		// shutdown
 }stateMachine_e;
 
-// to keep track of what we are selecting through UI
+// home screen elements. must be in the same order as what is drawn
 typedef enum{
-	VAR_TRIG_TIME = 0,
-	VAR_SHUTTER_TIME,
-	VAR_TIMELAPSE_N,
-	VAR_TIMELAPSE_DUR,
-	VAR_END,
-}configVars_e;
-
-typedef enum{
-	HOME_ELE_SHUTTER_TIME = 0,
-	HOME_ELE_TRIG_TIME,
+	HOME_ELE_TRIG_TIME = 0,
+	HOME_ELE_SHUTTER_TIME,
 	HOME_ELE_TIMELAPSE_N,
 	HOME_ELE_TIMELAPSE_DUR,
+	HOME_ELE_NUMB_END,			// not really a variable, but to indicate the last number element
 	HOME_ELE_START_BT,
 	HOME_ELE_END,
 }homeElements_e;
@@ -75,6 +67,8 @@ void shutdownDevice(void);
 void selectTiaSens(uint8_t sens);
 void line_draw_abstract(uint8_t *canvasBuff, uint16_t canvasW, uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
 void line_draw_vert_abstract(uint8_t *canvasBuff, uint16_t canvasW, uint16_t x, uint16_t h);
+void trigBattMonReading(void);
+void triggerCamera(bool trig);
 
 stateMachine_e state;
 uint autoShutdownTimer;		// counter for auto shutting down
@@ -82,19 +76,23 @@ uint autoShutdownTimer;		// counter for auto shutting down
 bool trigUpdateLcd;			// whether main should update something on the display
 
 homeElements_e selectedElem;		// selected element on screen, can be button or editable variable
-// homeElements_e lastSelectedElem;	// last value of selectedElem, used to draw only as needed
-// uint editVarCurr;			// current variable that is edited. Only valid in state `STATE_EDITING_VAR`
 uint lastEncoderState;
-int encoderCnt = 0;			// local counter for the encoder
+int encoderCnt = 0;								// local counter for the encoder position
 bool holdEncoderWaitForDepress = false;			// flag if we are waiting for the encoder to depress to not count previous hold state against counter
+
+uint battMonTick = 0;		// isr ticks to determine when to measure battery monitor, once a second
+bool battMonTriggered = false;
 
 struct button_s encoderBt;
 struct button_s leftBt;
 struct button_s rightBt;
 
 struct config_s conf;
+uint prevNPics;				// part of the previous config that is blown away during runtime, so this is used to restore it
 
 float currentTrigTime;		// ticks, current state timer for trigger and arm
+
+const char *varTexts[HOME_ELE_NUMB_END] = {"Shutter delay:", "Shutter Time:", "Timelapse #Pics:", "Timelapse Delay:"};
 
 void initMcu(void){
 	// init clock, 64Mhz system and periferal clock
@@ -126,6 +124,7 @@ void initMcu(void){
 	// enable clock for port a, b, and c
 	RCC->IOPENR |= RCC_IOPENR_GPIOAEN | RCC_IOPENR_GPIOBEN | RCC_IOPENR_GPIOCEN;
 
+	// PA2 (CAM_FOC) - output
 	// PA4 (BT1) - input
 	// PA5 (BT2)) - inpuit
 	// PA6 (Trig_1) - output
@@ -138,7 +137,7 @@ void initMcu(void){
 	// PA13 (SWDIO) - alternate
 	// PA14 (SWCLK) - alternate
 	// PA15 (LCB_BLK) - output
-	GPIOA->MODER = 0x695a50ff;
+	GPIOA->MODER = 0x695a50df;
 	GPIOA->AFR[1] |= 0x22;              // A8 and A9 -> AF2 (Timer 1 inputs)
 
 	// port b output
@@ -201,6 +200,19 @@ void initMcu(void){
 	TIM6->ARR = 16000;
 	TIM6->CNT = 0;
 
+	// init adc
+    RCC->APBENR2 |= RCC_APBENR2_ADCEN;
+    // Disable ADC in case it was beforehand
+    if(ADC1->CR & ADC_CR_ADEN){
+        ADC1->CR |= ADC_CR_ADDIS;
+        while(ADC1->CR & ADC_CR_ADDIS);
+    }
+	ADC1->CFGR2 = 0x40000000;       // PCLK/2
+    ADC1->SMPR = (0b11 << ADC_SMPR_SMP1_Pos);   // 12.5 ADC clock cycles for sampling time
+    ADC1->CHSELR = 1 << 13;          // vrefint	// todo: make run-time settable for other ADC inputs when that gets added
+	ADC->CCR  = (1 << 22);		 	// enable vref
+    ADC1->CR = ADC_CR_ADVREGEN;      // ADVREGEN=1
+
 	// set led backlight on
 	GPIOA->ODR |= 1 << 15;
 	DISP_CS_1;
@@ -209,17 +221,6 @@ void initMcu(void){
 	NVIC_EnableIRQ(TIM14_IRQn);
 
 	SPI2->CR1 |= SPI_CR1_SPE;
-}
-
-void triggerCamera(bool trig){
-	volatile uint32_t *reg;
-	if(trig){
-		reg = &GPIOB->BSRR;
-	} else {
-		reg = &GPIOB->BRR;
-	}
-
-	*reg = (1 << 7) | (1 << 2);
 }
 
 void adcCal(void){
@@ -234,7 +235,12 @@ void adcCal(void){
 	ADC1->CALFACT = cal;
 }
 
-const char *varTexts[VAR_END] = {"Shutter delay:", "Shutter Time:", "Timelapse #Pics:", "Timelapse Delay:"};
+void drawBatteryVoltage(float batt){
+	// for now is just text
+	char nStr[16];
+	npf_snprintf(nStr, 16, "%5.2f v", batt);
+	gc9a01_print_text_sma(nStr, 120, 20, gc9a01_color_white, gc9a01_color_black, ALIGN_CENTER, NULL);
+}
 
 void drawHomeScreenValuesSingle(int index, char *toWrite){
 	uint y = 50 + 32*index;
@@ -261,7 +267,7 @@ void drawHomeScreenValuesAll(void){
 	uint32_t fg = gc9a01_color_white;
 	uint32_t bg = gc9a01_color_black;
 
-	for(int i=0;i<VAR_END;i++){
+	for(int i=0;i<HOME_ELE_NUMB_END;i++){
 		if(state == STATE_EDITING_VAR && selectedElem == i){
 			fg = gc9a01_color_black;
 			bg = gc9a01_color_white;
@@ -272,19 +278,19 @@ void drawHomeScreenValuesAll(void){
 		}
 
 		switch(i){
-			case VAR_SHUTTER_TIME:
-				varF = conf.shutterSpeed;
-				npf_snprintf(nStr, 10, "%5.2f", varF);
-				break;
-			case VAR_TRIG_TIME:
+			case HOME_ELE_TRIG_TIME:
 				varF = conf.shutterDelay;
 				npf_snprintf(nStr, 10, "%5.2f", varF);
 				break;
-			case VAR_TIMELAPSE_N:
+			case HOME_ELE_SHUTTER_TIME:
+				varF = conf.shutterSpeed;
+				npf_snprintf(nStr, 10, "%5.2f", varF);
+				break;
+			case HOME_ELE_TIMELAPSE_N:
 				varI = conf.timelapseNPics;
 				npf_snprintf(nStr, 10, "%5d", varI);
 				break;
-			case VAR_TIMELAPSE_DUR:
+			case HOME_ELE_TIMELAPSE_DUR:
 				varF = conf.timelapseInterval;
 				npf_snprintf(nStr, 10, "%5.2f", varF);
 				break;
@@ -354,7 +360,7 @@ void drawHomeScreenElementsStartBt(void){
 }
 
 // updates a certain progress bar. prog is from 0 to 1
-void drawHomeProgressUpdate(configVars_e config, float prog){
+void drawHomeProgressUpdate(homeElements_e config, float prog){
 	boundingBox_t textBox;
 	uint y = 50+16+(config*32);
 
@@ -376,7 +382,7 @@ void drawHomeScreenElements(void){
 	uint32_t fg = gc9a01_color_white;
 	uint32_t bg = gc9a01_color_black;
 
-	for(int i=0;i<VAR_END;i++){
+	for(int i=0;i<HOME_ELE_NUMB_END;i++){
 		if(state == STATE_STANDBY && selectedElem == i){
 			fg = gc9a01_color_black;
 			bg = gc9a01_color_white;
@@ -408,19 +414,33 @@ void setStateMachine(stateMachine_e newState){
 	encoderCnt = 0;
 	currentTrigTime = 0;
 
+	//this enables the camera trigger on transition
 	if(newState == STATE_TRIG){
 		triggerCamera(true);
 	} else {
 		triggerCamera(false);
 	}
 
+	// set a hold encoder flag and service auto shutdown when we are transitioning in or out of standby
 	if(state == STATE_STANDBY || newState == STATE_STANDBY){
 		holdEncoderWaitForDepress = true;
 		autoShutdownService();
 	}
 
+	// clear screen when we are moving in and out of the screensaver state
 	if(state == STATE_SCREENSAVER || newState == STATE_SCREENSAVER){
 		gc9a01_fill_screen(gc9a01_color_black);
+	}
+
+	if(newState == STATE_ARMED){
+		prevNPics = conf.timelapseNPics;
+	}
+
+	// if we already started taking pictures, restore the last timelapse amount on exit back to standby
+	if(newState == STATE_STANDBY && (state == STATE_TRIG || state == STATE_TIMELAPSE)){
+		if(prevNPics != 0xA5A5A5A5){
+			conf.timelapseNPics = prevNPics;
+		}
 	}
 
 	state = newState;
@@ -439,14 +459,20 @@ int main(void){
 	state = STATE_RESET;
 
 	initMcu();
+	adcCal();
+
+	// calculate adc vrefint votltage. See section 3.14.2 of datasheet for magic location
+	uint16_t adcVrefIntCnt = *(uint16_t *)0x1FFF75AA;
+	float adcVrefIntV = ((float)adcVrefIntCnt / 4096.0) * 3.0;
 
 	autoShutdownTimer = 0;
 	trigUpdateLcd = false;
 
 	memset(&conf, 0, sizeof(conf));
-	conf.timelapseInterval = 1.0;
+	conf.timelapseInterval = DEFAULT_TIMELAPSE_DELAY;
 	conf.shutterDelay = DEFAULT_SHUTTER_DELAY;
 	conf.shutterSpeed = DEFAULT_SHUTTER_TIME;
+	prevNPics = 0xA5A5A5A5;		// key that this is None/not populated
 	memset(&encoderBt, 0, sizeof(encoderBt));
 	selectedElem = HOME_ELE_SHUTTER_TIME;
 
@@ -464,6 +490,12 @@ int main(void){
 	TIM6->CR1 |= TIM_CR1_CEN;		// enable timer
 	TIM14->CR1 |= TIM_CR1_CEN;		// enable timer
 	__enable_irq();
+
+	ADC1->CR |= ADC_CR_ADEN;       // enable ADC
+
+	// initial trigger to have something to draw
+	trigBattMonReading();
+	battMonTriggered = true;
 
 	state = STATE_STANDBY;
 	drawHomeScreenElements();
@@ -535,19 +567,19 @@ int main(void){
 				}
 				if(encoderPostDivDelta){
 					switch(selectedElem){
-						case VAR_SHUTTER_TIME:
-							conf.shutterSpeed += encoderPostDivDelta;
-							if(conf.shutterSpeed < 1.0){conf.shutterSpeed = 1.0;}
-							break;
-						case VAR_TRIG_TIME:
+						case HOME_ELE_TRIG_TIME:
 							conf.shutterDelay += encoderPostDivDelta;
 							if(conf.shutterDelay < 1.0){conf.shutterDelay = 1.0;}
 							break;
-						case VAR_TIMELAPSE_N:
+						case HOME_ELE_SHUTTER_TIME:
+							conf.shutterSpeed += encoderPostDivDelta;
+							if(conf.shutterSpeed < 1.0){conf.shutterSpeed = 1.0;}
+							break;
+						case HOME_ELE_TIMELAPSE_N:
 							conf.timelapseNPics += encoderPostDivDelta;
 							if(conf.timelapseNPics < -1){conf.timelapseNPics = -1;}
 							break;
-						case VAR_TIMELAPSE_DUR:
+						case HOME_ELE_TIMELAPSE_DUR:
 							conf.timelapseInterval += encoderPostDivDelta;
 							if(conf.timelapseInterval < 1.0){conf.timelapseInterval = 1.0;}
 							break;
@@ -563,10 +595,10 @@ int main(void){
 					setStateMachine(STATE_TRIG);
 				}
 				else{
-					drawHomeProgressUpdate(VAR_TRIG_TIME, currentTrigTime / conf.shutterDelay);
+					drawHomeProgressUpdate(HOME_ELE_TRIG_TIME, currentTrigTime / conf.shutterDelay);
 					// todo: bug where this, for a very small period of time, goes to zero
 					npf_snprintf(tmpS, 16, "%5.2f", conf.shutterDelay - currentTrigTime);
-					drawHomeScreenValuesSingle(VAR_TRIG_TIME, tmpS);
+					drawHomeScreenValuesSingle(HOME_ELE_TRIG_TIME, tmpS);
 				}
 				
 				if(encoderBt.depressedTrig == true){
@@ -595,9 +627,9 @@ int main(void){
 					}
 				}
 				else{
-					drawHomeProgressUpdate(VAR_SHUTTER_TIME, currentTrigTime / conf.shutterSpeed);
+					drawHomeProgressUpdate(HOME_ELE_SHUTTER_TIME, currentTrigTime / conf.shutterSpeed);
 					npf_snprintf(tmpS, 16, "%5.2f", conf.shutterSpeed - currentTrigTime);
-					drawHomeScreenValuesSingle(VAR_SHUTTER_TIME, tmpS);
+					drawHomeScreenValuesSingle(HOME_ELE_SHUTTER_TIME, tmpS);
 				}
 
 				if(encoderBt.depressedTrig == true){
@@ -618,9 +650,9 @@ int main(void){
 					setStateMachine(STATE_TRIG);
 				}
 				else{		// update as needed
-					drawHomeProgressUpdate(VAR_TIMELAPSE_DUR, currentTrigTime / conf.timelapseInterval);
+					drawHomeProgressUpdate(HOME_ELE_TIMELAPSE_DUR, currentTrigTime / conf.timelapseInterval);
 					npf_snprintf(tmpS, 16, "%5.2f", conf.timelapseInterval - currentTrigTime);
-					drawHomeScreenValuesSingle(VAR_TIMELAPSE_DUR, tmpS);
+					drawHomeScreenValuesSingle(HOME_ELE_TIMELAPSE_DUR, tmpS);
 				}
 
 				if(encoderBt.depressedTrig == true){
@@ -656,6 +688,21 @@ int main(void){
 			default:
 				break;
 		}
+
+		if(battMonTriggered){
+			if(ADC1->ISR & ADC_ISR_EOC){
+				battMonTriggered = false;
+				float meas = (float)(ADC1->DR);
+				meas /= 4096;
+				meas = adcVrefIntV / meas;
+				
+				if(state != STATE_SCREENSAVER){
+					// just update the display
+					drawBatteryVoltage(meas);
+				}
+
+			}
+		}
 	}
 
 	return 0;
@@ -685,6 +732,12 @@ void TIM14_IRQHandler(void){
 
 	buttonState = (GPIOA->IDR & (1 << 5)) == 0;
 	buttonPressHandler(&rightBt, buttonState);
+
+	if(++battMonTick >= 2000){		// once every 2 seconds should be OK
+		battMonTick = 0;
+		trigBattMonReading();
+		battMonTriggered = true;
+	}
 
 	currentTrigTime += 0.001;	
 }
@@ -762,4 +815,20 @@ void selectTiaSens(uint8_t sens){
 			// todo: error handling
 			break;
 	}
+}
+
+void trigBattMonReading(void){
+	ADC1->CR |= ADC_CR_ADSTART;
+}
+
+void triggerCamera(bool trig){
+	volatile uint32_t *reg;
+	if(trig){
+		reg = &GPIOA->BSRR;
+	} else {
+		reg = &GPIOA->BRR;
+	}
+
+	*reg = (1 << 7) | (1 << 2);
+	// *reg = (1 << 7);
 }

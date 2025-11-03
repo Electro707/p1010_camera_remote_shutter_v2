@@ -128,6 +128,8 @@ int main(void)
     boundingBox_t box1;
     initMcu();
 
+    // selectTiaSens(1);
+    // selectTiaSens(2);
     selectTiaSens(3);
 
 
