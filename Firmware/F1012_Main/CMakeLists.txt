@@ -6,7 +6,7 @@ set(CMAKE_TOOLCHAIN_FILE "/home/electro/STM32Cube/Repository/stm32-cmake/cmake/s
 
 project(CameraRemoteShutterV2 C ASM)
 
-set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
+# set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 
 set(STM32_CUBE_G0_PATH "/home/electro/STM32Cube/Repository/STM32CubeG0")
 

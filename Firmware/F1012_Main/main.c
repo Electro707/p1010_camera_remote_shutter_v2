@@ -13,6 +13,7 @@
 #include "gc9a01.h"
 #include "config.h"
 #include <stddef.h>
+#include <stm32g071xx.h>
 #include <string.h>
 #include "nanoprintf.h"
 #include "graphics.h"
@@ -36,11 +37,12 @@ typedef enum{
 	HOME_ELE_TRIG_TIME = 0,
 	HOME_ELE_SHUTTER_TIME,
 	HOME_ELE_TIMELAPSE_N,
-	HOME_ELE_TIMELAPSE_DUR,
-	HOME_ELE_NUMB_END,			// not really a variable, but to indicate the last number element
+	HOME_ELE_TIMELAPSE_DUR,		// end of editable variables
 	HOME_ELE_START_BT,
 	HOME_ELE_END,
 }homeElements_e;
+
+#define HOME_ELE_NUMB_END (HOME_ELE_TIMELAPSE_DUR+1)
 
 // trigger configs
 struct config_s{
@@ -491,7 +493,8 @@ int main(void){
 	TIM14->CR1 |= TIM_CR1_CEN;		// enable timer
 	__enable_irq();
 
-	ADC1->CR |= ADC_CR_ADEN;       // enable ADC
+	ADC1->CR |= ADC_CR_ADEN;       					// enable ADC
+	while((ADC1->ISR & ADC_ISR_ADRDY) == 0);		// wait for adc to come up
 
 	// initial trigger to have something to draw
 	trigBattMonReading();
@@ -509,6 +512,7 @@ int main(void){
 			autoShutdownService();
 		}
 
+		// THE state machine handler
 		switch(state){
 			case STATE_STANDBY:
 				if(autoShutdownTimer >= SCREENSAVER_INTERVAL){
@@ -691,7 +695,6 @@ int main(void){
 
 		if(battMonTriggered){
 			if(ADC1->ISR & ADC_ISR_EOC){
-				battMonTriggered = false;
 				float meas = (float)(ADC1->DR);
 				meas /= 4096;
 				meas = adcVrefIntV / meas;
@@ -701,6 +704,7 @@ int main(void){
 					drawBatteryVoltage(meas);
 				}
 
+				battMonTriggered = false;
 			}
 		}
 	}
@@ -830,5 +834,4 @@ void triggerCamera(bool trig){
 	}
 
 	*reg = (1 << 7) | (1 << 2);
-	// *reg = (1 << 7);
 }
