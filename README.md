@@ -60,6 +60,13 @@ st-flash write <file_to_flash>.bin 0x08000000
 
 Where the <file_to_flash> is the bin file inside of the build folder. `0x08000000` is the starting flash address for the STM32G0 family.
 
+### Tools/Generators
+Some things in the firmware, such as font and image bitmap generation, where created from python scripts in `Firmware/tools`. See [README.md in that directory](Firmware/tools/README.md) for more info
+
+### Useful tools and resources
+The following tools and I found useful when developing this firmware, and thus deserves a shoutout
+- [RGB656 Color Picker by rgbcolorpicker.com](https://rgbcolorpicker.com/565), which I found useful when picking colors for the RGB565 format I set the LCD to.
+
 ## KiCAD 3D Models
 The 3D models for some components in the directory `PCB/3d_model/` are not included due to licensing reasons. You can grab the step files yourself and put it in that directory from the manufacturer. The models are
 - CUI_DEVICES_SJ-2509N.step

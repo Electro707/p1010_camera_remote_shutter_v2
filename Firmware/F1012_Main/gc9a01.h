@@ -9,22 +9,21 @@
 #include "graphics.h"
 
 /********** Function Declaration **********/
-void gc9a01_init(void);
-void gc9a01_fill_screen(uint32_t color);
+void gc9a01Init(void);
+void gc9a01SetDrawWindow(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
+void gc9a01_send_color(uint32_t rgbParsed);
+void gc9a01_send_color_noWait(uint32_t rgbParsed);
 void gc9a01_set_addr_window(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
 
-void gc9a01_print_text_sma(const char *text, uint16_t x, uint16_t y, uint16_t color, uint16_t bgColor, alignment_e alignMode, boundingBox_t *textBox);
-void gc9a01_print_text_med(const char *text, uint16_t x, uint16_t y, uint16_t color, uint16_t bgColor, alignment_e alignMode, boundingBox_t *textBox);
-void gc9a01_print_text_big(const char *text, uint16_t x, uint16_t y, uint16_t color, uint16_t bgColor, alignment_e alignMode, boundingBox_t *textBox);
+void gc9a01DrawInit(void);
+void gc9a01DrawEnd(void);
+
 void gc9a01_point(uint16_t x, uint16_t y, uint32_t color);
 void gc9a01_line(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, uint32_t color);
 void gc9a01_vert_line(uint16_t x, uint16_t y0, uint16_t y1, uint32_t color);
-void gc9a01_draw_rect(boundingBox_t *textBox, uint32_t color, uint32_t thickness);
-void gc9a01_draw_fill_rect_textBox(boundingBox_t *textBox, uint32_t color);
-void gc9a01_draw_fill_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint32_t color);
 void gc9a01_draw_bit_canvas(uint8_t *canvas, uint16_t x0, uint16_t y0, uint16_t w, uint16_t h, uint32_t color);
 
-void _gc9a01_send_single_cmd_data(uint8_t command, uint8_t data);
+void gc9a01_send_single_cmd_data(uint8_t command, uint8_t data);
 
 /********** Defines for Commands and Whatnot **********/
 #define DISP_CMD_INTER_REG_EN2 0xEF

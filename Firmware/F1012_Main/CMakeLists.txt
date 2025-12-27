@@ -6,7 +6,7 @@ set(CMAKE_TOOLCHAIN_FILE "/home/electro/STM32Cube/Repository/stm32-cmake/cmake/s
 
 project(CameraRemoteShutterV2 C ASM)
 
-# set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
+set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 
 set(STM32_CUBE_G0_PATH "/home/electro/STM32Cube/Repository/STM32CubeG0")
 
@@ -17,17 +17,17 @@ add_executable(CameraRemoteShutterV2 main.c)
 
 target_include_directories(CameraRemoteShutterV2 PRIVATE
     ${CMAKE_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/gc9a01
-    ${CMAKE_SOURCE_DIR}/lvgl
 )
 
 target_sources(CameraRemoteShutterV2 PRIVATE
     syscalls.c
     main.c
-    gc9a01/gc9a01.c
+    gc9a01.c
     graphics.c
     font.c
-    screensaver.c
+    bitmap.c
+    stateScreensaver.c
+    stateTimelapse.c
 )
 
 # stm32_add_linker_script(CameraRemoteShutterV2 PRIVATE STM32G071K8TX_FLASH.ld)
@@ -41,7 +41,7 @@ target_link_libraries(CameraRemoteShutterV2 PRIVATE
     )
 
 target_compile_options(CameraRemoteShutterV2 PRIVATE 
-    -O2 -Wall
+    -O2 -Wall -g
 )
 
 target_link_options(CameraRemoteShutterV2 PRIVATE 

@@ -1,5 +1,6 @@
 #include "config.h"
 #include "gc9a01.h"
+#include "main.h"
 #include <math.h>
 #include <string.h>
 
@@ -156,7 +157,7 @@ void drawObj(float *obj, uint *faceDef, uint objEdgeLen){
 	}
 }
 
-void serviceScreenSaver(void){
+void serviceScreenSaverDraw(void){
     memset(canvas, 0, CANVAS_HEIGHT*CANVAS_WIDTH_BYTE);
 
     createTransformMatrix(-20., rot, rot*0.5, txMatrix);
@@ -166,7 +167,25 @@ void serviceScreenSaver(void){
     gc9a01_draw_bit_canvas(canvas, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT, gc9a01_color_white);
 
     rot += 1;
-    if(rot > 360){
+    if(rot > 720){
         rot = 0;
     }
+}
+
+void serviceScreenSaverState(void){
+	if(trigUpdateLcd){		// update as needed
+		trigUpdateLcd = false;
+		serviceScreenSaverDraw();
+	}
+	if(autoShutdownTimer >= AUTO_SHUTDOWN_INTERVAL){
+		// setTimelapseSubstate(STATE_SHUTDOWN);		// explicit state transition not needed, end of device
+		shutdownDevice();
+	}
+	if(encoderBt.pressedTrig == true){
+		encoderBt.pressedTrig = false;
+		setStateMachinePrev();
+	}
+	if(encoderCnt){
+		setStateMachinePrev();
+	}
 }

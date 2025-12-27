@@ -15,10 +15,17 @@
 
 #define BUTTON_VALID_PERIOD_TICK    10       // tick (mS), how long to validate a button press/depress
 
+#define LCD_UPDATE_RATE_MS          50      // tick (mS), how often to update LCD during continuous events
+
+
+#define BATTERY_INDICATOR_UPDATE_RATE   2000    // tick (mS), how often to update battery indicator
 // how many 10 second increments before we auto-shutdown
 // #define AUTO_SHUTDOWN_INTERVAL		3		// 30 seconds
 #define AUTO_SHUTDOWN_INTERVAL		30		// 300 seconds
 #define SCREENSAVER_INTERVAL        2       // 20 seconds
+
+#define UI_WIDTH    240
+#define UI_HEIGHT   240
 
 /******* Internal defines *******/
 #define EVER    ;;
@@ -36,7 +43,8 @@
 #define DISP_RES_GPIO_Port  GPIOB
 #define DISP_RES_Pin        LL_GPIO_PIN_6
 
-
+#define BATT_PGOOD_Pin      LL_GPIO_PIN_14
+#define BATT_CHR_Pin        LL_GPIO_PIN_15
 
 #define NANOPRINTF_IMPLEMENTATION
 
@@ -45,5 +53,8 @@
 
 typedef unsigned int bool;
 typedef unsigned int uint;
+typedef uint32_t uint32;
+typedef int32_t int32;
+typedef uint16_t uint16;
 
 #endif
